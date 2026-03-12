@@ -1,0 +1,305 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Millicast - Realtime Streaming Demo (Broadcaster)</title>
+    <meta charset="utf-8">
+    <link rel="icon" type="image/x-icon" href="/images/dolby.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, maximum-scale=10.0, user-scalable=1">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css"
+          integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.3.1/css/all.css"
+          integrity="sha384-mzrmE5qonljUremFsqc01SB46JvROS7bZs3IO2EmfFsd15uHvIt+Y8vEf7N7fWAU"
+          crossorigin="anonymous">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,400i,600,700" rel="stylesheet">
+    <link rel="stylesheet" href="css/index.css">
+       <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            console.log('Script in <head> running after DOMContentLoaded.');
+
+            const dropdowns = document.querySelectorAll('.dropdown');
+            //console.log('Found dropdowns:', dropdowns);
+
+            dropdowns.forEach(dropdown => {
+                dropdown.style.display = 'none'; // Explicitly set display to 'none'
+                //console.log('Dropdown hidden:', dropdown);
+            });
+        });
+    </script>
+    <!--If there is a specific Millicast SDK Version used -->
+    <script src='https://cdn.jsdelivr.net/npm/@millicast/sdk@latest/dist/millicast.umd.js'></script>
+    
+</head>
+<body>
+    <div class="turnDeviceNotification"><img class="w-100" src='images/do-landscape-icon.png'></div>
+    <div class="turnDeviceNotification notification-margin-top"><img class="w-100" src='images/do-landscape-icon-wide.png'></div>
+
+<!--Stream Configuration Panel-->
+   <div id="streamConfigPanel"
+       style="position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:1000;
+            display:flex;gap:8px;align-items:center;">
+         <input type="text" id="streamIdInput"
+                    class="form-control form-control-sm"
+                    placeholder="Stream ID"
+                    value="" style="width:200px;" />
+       <input type="text" id="tokenInput"
+                    class="form-control form-control-sm"
+                    placeholder="Publishing Token"
+                    value="" style="width:200px;" />
+         <button id="applyStreamConfig"
+                    class="btn btn-sm btn-primary">
+                Apply
+        
+        </button>
+  
+    </div>
+    <div id="publishView" class="">
+
+        <div id="shareBanner" class="hidden">
+            <span>📺 Screen sharing active</span>
+            <button id="stopShareBtn">Stop Sharing</button>
+        </div>
+
+
+        <!-- Video Window -->
+        <section id="vidView" class="">
+            <div id="vidContainer" class="">
+                <!-- Main video output for users (composited stream will be shown here) -->
+                <video id="vidWin" autoplay muted playsinline></video>
+                <!-- Hidden elements for compositing only (never visible to user) -->
+                <video id="screenVideo" style="display:none"></video>
+                <video id="cameraVideo" style="display:none"></video>
+                <canvas id="compositeCanvas" style="display:none"></canvas>
+            </div>
+
+    </div>
+
+
+    <!-- Overlay controls -->
+    <div id="controlDisplay" class="">
+
+        <div id="topFade" class="fixed-top vid-fade blk-fade-top-bottom"></div>
+        <div id="btmFade" class="fixed-bottom vid-fade blk-fade-bottom-top"></div>
+
+        <div id="airIndicatorView" class="w-100 d-flex justify-content-start">
+            <div id="readyBadge" class="badges btn-group" role="group">
+                <span class="btn btn-sm btn-light ignore-mouse"> READY </span>
+            </div>
+            <div id="liveBadge" class="badges btn-group hidden" role="group">
+                <span class="btn btn-sm btn-danger ignore-mouse"> LIVE </span>
+                <span class="btn btn-sm btn-light ignore-mouse"><i class="fas fa-eye"></i> <span id="userCount"> 0 </span></span>
+            </div>
+        </div>
+
+        <div style="z-index: 0; right: 20px; top: 20px; position: absolute;">
+
+        </div>
+        <img id="cogButton" src="images/cog.png" alt="Settings" onclick="cogOpen()">
+
+        <h3 style="z-index: 20; right: 20px; top: 25px; position: absolute; width:125px; color:azure" class="dropdown">Media Settings</h3>
+
+
+        <div class="dropdown" style="z-index: 20; right: 20px; top: 95px; position: absolute; width:125px;">
+            <button id="bandwidthMenuButton" class="btn btn-secondary dropdown-toggle w-100 fs-18px" type="button"
+                    data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="hideshow">
+                Bitrate
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" id="bandwidthMenu" aria-labelledby="dropdownMenuButton" c>
+                <div class="dropdown-item fs-15px" data-rate="unlimited">Bitrate</div>
+                <div class="dropdown-item fs-15px" data-rate="10000">10 Mbps</div>
+                <div class="dropdown-item fs-15px" data-rate="9000">9000 kbps</div>
+                <div class="dropdown-item fs-15px" data-rate="8000">8000 kbps</div>
+                <div class="dropdown-item fs-15px" data-rate="7000">7000 kbps</div>
+                <div class="dropdown-item fs-15px" data-rate="6000">6000 kbps</div>
+                <div class="dropdown-item fs-15px" data-rate="5000">5000 kbps</div>
+                <div class="dropdown-item fs-15px" data-rate="4000">4000 kbps</div>
+                <div class="dropdown-item fs-15px" data-rate="3000">3000 kbps</div>
+                <div class="dropdown-item fs-15px" data-rate="2000">2000 kbps</div>
+                <div class="dropdown-item fs-15px" data-rate="1500">1500 kbps</div>
+                <div class="dropdown-item fs-15px" data-rate="1000">1000 kbps</div>
+                <div class="dropdown-item fs-15px" data-rate="500">500 kbps</div>
+                <div class="dropdown-item fs-15px" data-rate="250">250 kbps</div>
+                <div class="dropdown-item fs-15px" data-rate="125">125 kbps</div>
+            </div>
+
+
+            <div class="dropdown" style="z-index: 25; right: 1px; top: 60px; position: absolute; width:125px">
+                <button id="codecMenuButton" class="btn btn-secondary dropdown-toggle w-100 fs-12px" type="button"
+                        data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                    Codec
+                </button>
+                <div class="dropdown-menu dropdown-menu-right" id="codecMenu" aria-labelledby="dropdownMenuButton">
+                    <div class="dropdown-item fs-15px" value="h264" data-codec="h264">h264</div>
+                    <div class="dropdown-item fs-15px" value="vp8" data-codec="vp8">vp8</div>
+                    <div class="dropdown-item fs-15px" value="vp9" data-codec="vp9">vp9</div>
+                    <div class="dropdown-item fs-15px" value="h265" data-codec="h265">h265</div>
+                    <div class="dropdown-item fs-15px" value="av1" data-codec="av1">av1</div>
+                </div>
+
+
+                <div class="dropdown" style="z-index: 20; right: 0px; top: 55px; position: absolute; width:125px">
+                    <button id="fpsMenuButton" class="btn btn-secondary dropdown-toggle w-100 fs-15px" type="button"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-right" id="fpsMenu" aria-labelledby="dropdownMenuButton">
+                        <div class="dropdown-item fs-15px" value='15' data-fps="15">15</div>
+                        <div class="dropdown-item fs-15px" value='24' data-fps="24">24</div>
+                        <div class="dropdown-item fs-15px" value='25' data-fps="25">25</div>
+                        <div class="dropdown-item fs-15px" value='29' data-fps="29.97">29.97</div>
+                        <div class="dropdown-item fs-15px" value='30' data-fps="30">30</div>
+                        <div class="dropdown-item fs-15px" value='60' data-fps="60">60</div>
+                    </div>
+
+                    <div class="dropdown" style="z-index: 20; right: 0px; top: 60px; position: absolute; width:125px">
+                        <button id="aspMenuButton" class="btn btn-secondary dropdown-toggle w-100 fs-15px" type="button"
+                                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            Aspect
+                        </button>
+
+                        <div class="dropdown-menu dropdown-menu-right" id="aspMenu" aria-labelledby="dropdownMenuButton">
+                            <div class="dropdown-item fs-15px" value='1.7' data-aspect="1.777778">16:9</div>
+                            <div class="dropdown-item fs-15px" value='1.4' data-aspect="1.4">4:3</div>
+                            <div class="dropdown-item fs-15px" value='.9' data-aspect="1.1">1:1</div>
+
+                        </div>
+                        <div class="dropdown" style="z-index: 20; right: 0px; top: 65px; position: absolute; width:125px">
+                            <button id="resolutionMenuButton" class="btn btn-secondary dropdown-toggle w-100 fs-15px" type="button"
+                                    data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                Resolution
+                            </button>
+                            <div class="dropdown-menu dropdown-menu-right" id="resolutionMenu" aria-labelledby="dropdownMenuButton">
+                                <div class="dropdown-item fs-15px" value='120' data-resolution="120">120p</div>
+                                <div class="dropdown-item fs-15px" value='240' data-resolution="240">240p</div>
+                                <div class="dropdown-item fs-15px" value='360' data-resolution="360">360p</div>
+                                <div class="dropdown-item fs-15px" value='480' data-resolution="480">480p</div>
+                                <div class="dropdown-item fs-15px" value='540' data-resolution="540">540p</div>
+                                <div class="dropdown-item fs-15px" value='640' data-resolution="640">640p</div>
+                                <div class="dropdown-item fs-15px" value='720' data-resolution="720">720p</div>
+                                <div class="dropdown-item fs-15px" value='1080' data-resolution="1080">1080p</div>
+                                <div class="dropdown-item fs-15px" value='1440' data-resolution="1440">2K</div>
+                                <div class="dropdown-item fs-15px" value='2160' data-resolution="2160">4k</div>
+                            </div>
+
+
+                            <div class="form" style="z-index: 20; left:-5px; right:0px; top: 70px; position: absolute; width:20px">
+                                <input type="text" class="input" value="SourceId" id="sourceId" style="width:130px">
+
+                            </div>
+                            <div class="form-check" style="z-index: 20; right: 0px; top: 110px; position: absolute; width:125px">
+                                <input type="checkbox" class="form-check-input" id="simulcastCheckbox">
+                                <label class="form-check-label fs-15px" for="simulcastCheckbox" style="color:azure">Enable Simulcast</label>
+
+                            </div>
+
+
+                            </section>
+
+
+                            <!-- CONTROLS -->
+                            <section id="vidCtrlView" class="p-3">
+                                <div id="ctrlUI" class="row no-gutters">
+                                    <!-- MIC CONTROL -->
+                                    <div class="col-4 col-xl-3 offset-xl-1">
+                                        <div class="btn-group btn-block" role="group" aria-label="Microphone Controls">
+                                            <!-- MIC LIST -->
+                                            <div class="btn-group dropup btn-block">
+                                                <button id="micListBtn" class="btn btn-secondary btn-lg dropdown-toggle btn-block" type="button" data-toggle="dropdown" aria-haspopup="true"
+                                                        aria-expanded="false">
+                                                    <p>...</p><span class="boxCover"></span>
+                                                </button>
+                                                <div id="micList" class="dropdown-menu dropdown-menu-left">
+                                                    <button class="dropdown-item" type="button">...</button>
+                                                </div>
+                                            </div>
+                                            <!-- MIC MUTE -->
+                                            <button id="micMuteBtn" type="button" class="btn btn-secondary">
+                                                <i id="micOnIcon" class="fas fa-microphone"></i>
+                                                <!--<i id="micOffIcon" class="fas fa-microphone-slash d-none"></i>-->
+                                                <span ref="volMeter" class="vol-meter-lg d-none"></span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <!-- PUBLISH BUTTON using publisher.js -->
+                                   <!--  <div id="publishSection" class="col-4 col-xl-4 px-1 px-sm-3">
+                                        <button id="publishBtn" type="button" class="btn btn-success btn-lg btn-block">Start</button>
+                                    </div>  -->
+                                    
+                                    <!-- PUBLISH BUTTON add if token is set to  record -->
+                                    <div id="publishSection" class="col-4 col-xl-4 px-1 px-sm-3">
+                                        <div class="publish-wrap">
+                                            <button id="publishBtn" type="button" class="btn btn-success btn-lg btn-block">Start</button>
+
+                                            <!-- Overlayed record control (20% right) -->
+                                            <button id="recordBtn" type="button"
+                                                    class="btn record-btn d-none"
+                                                    aria-label="Record control">
+                                                Rec
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div id="shareSection" class="col-4 col-xl-4 px-1 px-sm-3 d-none">
+                                        <div class="btn-group btn-block" role="group" aria-label="Viewer Path">
+                                            <button id="viewerURL" type="button" class="btn btn-block px-3">https://</button>
+                                            <button id="copyBtn" type="button" class="btn btn-secondary px-3">copy</button><!-- <i class="fas fa-copy ignore-mouse"></i> -->
+                                        </div>
+                                    </div>
+                                    <!-- CAMERA CONTROL -->
+                                    <div class="col-4 col-xl-3">
+                                        <div class="row">
+                                            <div class="col">
+                                                <!--<div class="btn btn-outline-light">-->
+                                                <!--tetst-->
+                                                <!--</div>-->
+                                                <div class="btn-group btn-block w-100" role="group" aria-label="Camera Controls">
+                                                    <!-- CAM MUTE -->
+                                                    <button id="camMuteBtn" type="button" class="btn btn-secondary">
+                                                        <i id="camOnIcon" class="fas fa-video"></i>
+                                                        <!--<i id="camOffIcon" class="fas fa-video-slash d-none"></i>-->
+                                                    </button>
+                                                    <!-- CAM LIST -->
+                                                    <div class="btn-group dropup btn-block">
+                                                        <button id="camListBtn" class="btn btn-secondary btn-lg dropdown-toggle btn-block" type="button" data-toggle="dropdown" aria-haspopup="true"
+                                                                aria-expanded="false">
+                                                            <p>Select Camera</p><span class="boxCover"></span>
+                                                        </button>
+                                                        <div id="camList" class="dropdown-menu dropdown-menu-right">
+                                                            <button class="dropdown-item" type="button" id="screenShare">Screen Share</button>
+                                                            <button class="dropdown-item" type="button" id="screenCameraComposite">Screen + Camera</button>
+                                                        </div>
+
+                                                        <!-- Share <section id="vidCtrlView" class="p-3"> -->
+                                                        <div class="col-4 col-xl-3 px-1 px-sm-3" id="shareLinkSection">
+                                                            <button id="shareLinkBtn" class="btn btn-outline-light btn-lg btn-block">
+                                                                <i class="fas fa-share-alt"></i>
+                                                            </button>
+                                                        </div>
+
+
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                </div>
+                        </div>
+                        </section>
+                    </div>
+
+
+                </div>
+            </div>
+
+            <!-- BOOTSTRAP -->
+            <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.3/umd/popper.min.js"
+                    integrity="sha384-ZMP7rVo3mIykV+2+9J3UJ46jBk0WLaUAdn689aCwoqbBJiSnjAK/l8WvCWPIPm49" crossorigin="anonymous"></script>
+            <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/js/bootstrap.min.js"
+                    integrity="sha384-ChfqqxuZUCnJSK3+MXmPNIyE6ZbWh2IMqE241rYiqJxyMiZ6OW/JmZQ5stwEULTy" crossorigin="anonymous"></script>
+  
+           <script type="module" src="js/publisher_multi.js"></script>
+
+</body>
+</html>
