@@ -19,28 +19,91 @@
     var prevAudioBytes = 0;
     var prevTimestamp = 0;
     var isCollecting = false;
+    var peerFound = false;
 
     function getOverlay() {
         return document.getElementById('statsOverlay');
     }
 
     /**
-     * Try multiple access patterns to get the underlying RTCPeerConnection.
+     * Try every known access pattern to get the underlying RTCPeerConnection
+     * from the Millicast SDK's Publish / PeerConnection wrapper.
      */
     function getRTCPeerConnection() {
         var pub = window._publisher;
-        if (!pub) return null;
+        if (!pub) {
+            if (!peerFound) console.log('[Stats] window._publisher not set yet');
+            return null;
+        }
+
         var peer = pub.webRTCPeer;
-        if (!peer) return null;
-        if (typeof peer.getRTCPeerConnection === 'function') return peer.getRTCPeerConnection();
-        if (peer.peer) return peer.peer;
-        if (typeof peer.getStats === 'function' && typeof peer.getSenders === 'function') return peer;
-        return null;
+        if (!peer) {
+            if (!peerFound) console.log('[Stats] webRTCPeer not available yet');
+            return null;
+        }
+
+        // Log available properties once for debugging
+        if (!peerFound) {
+            console.log('[Stats] webRTCPeer found, type:', typeof peer);
+            console.log('[Stats] webRTCPeer keys:', Object.keys(peer));
+            if (peer.peer) console.log('[Stats] webRTCPeer.peer found, type:', typeof peer.peer);
+            if (peer.pc) console.log('[Stats] webRTCPeer.pc found, type:', typeof peer.pc);
+            if (peer.peerConnection) console.log('[Stats] webRTCPeer.peerConnection found');
+            console.log('[Stats] getRTCPeerConnection exists:', typeof peer.getRTCPeerConnection);
+            console.log('[Stats] getStats exists:', typeof peer.getStats);
+            console.log('[Stats] getSenders exists:', typeof peer.getSenders);
+        }
+
+        var pc = null;
+
+        // Pattern 1: Millicast SDK getRTCPeerConnection() method
+        if (typeof peer.getRTCPeerConnection === 'function') {
+            pc = peer.getRTCPeerConnection();
+        }
+        // Pattern 2: Direct .peer property (Millicast PeerConnection wrapper)
+        if (!pc && peer.peer) {
+            pc = peer.peer;
+        }
+        // Pattern 3: .pc property
+        if (!pc && peer.pc) {
+            pc = peer.pc;
+        }
+        // Pattern 4: .peerConnection property
+        if (!pc && peer.peerConnection) {
+            pc = peer.peerConnection;
+        }
+        // Pattern 5: webRTCPeer itself is the RTCPeerConnection
+        if (!pc && typeof peer.getStats === 'function' && typeof peer.getSenders === 'function') {
+            pc = peer;
+        }
+        // Pattern 6: Check all own properties for an RTCPeerConnection instance
+        if (!pc) {
+            var keys = Object.keys(peer);
+            for (var i = 0; i < keys.length; i++) {
+                var val = peer[keys[i]];
+                if (val && typeof val === 'object' && typeof val.getStats === 'function' && typeof val.getSenders === 'function') {
+                    if (!peerFound) console.log('[Stats] Found RTCPeerConnection at webRTCPeer.' + keys[i]);
+                    pc = val;
+                    break;
+                }
+            }
+        }
+
+        if (pc && !peerFound) {
+            peerFound = true;
+            console.log('[Stats] RTCPeerConnection acquired successfully');
+        }
+        if (!pc && !peerFound) {
+            console.log('[Stats] Could not find RTCPeerConnection from webRTCPeer');
+        }
+
+        return pc;
     }
 
     function startStats() {
         if (isCollecting) return;
         isCollecting = true;
+        peerFound = false;
         var overlay = getOverlay();
         if (!overlay) return;
 
@@ -114,6 +177,7 @@
             statsInterval = null;
         }
         isCollecting = false;
+        peerFound = false;
         prevVideoBytes = 0;
         prevAudioBytes = 0;
         prevTimestamp = 0;
@@ -130,8 +194,6 @@
     window.addEventListener('publisherBroadcastStop', stopStats);
 
     // Fallback: poll the LIVE badge visibility every 2s to detect broadcast state.
-    // This catches cases where the custom event fires before stats.js loads
-    // (e.g. module scripts execute asynchronously).
     function pollLiveBadge() {
         var liveBadge = document.getElementById('liveBadge');
         if (!liveBadge) return;
