@@ -658,3 +658,41 @@ canvas#availBitrateOverlay {
     font-size: 0.9rem;
   }
 }
+
+/* ── Stats Overlay (under LIVE badge, top-left) ── */
+#statsOverlay {
+  position: absolute;
+  top: 52px;
+  left: 20px;
+  width: 220px;
+  background: transparent;
+  color: #0f0;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  z-index: 200;
+  pointer-events: none;
+  line-height: 1.5;
+  text-shadow: 0 0 4px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.7);
+}
+
+#statsOverlay .stats-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 1px 0;
+}
+
+#statsOverlay .stats-label {
+  color: #ccc;
+}
+
+#statsOverlay .stats-value.stats-ok {
+  color: #00ff00;
+  font-weight: bold;
+}
+
+#statsOverlay .stats-value.stats-bad {
+  color: #ff2222;
+  font-weight: bold;
+}

@@ -414,7 +414,37 @@ document.addEventListener("DOMContentLoaded", async (event) => {
 
         console.log('Applied Stream ID:', streamAccountId, '/', streamName);
         console.log('Applied Token:    ', publishToken);
+
+        // Check token for recording capability on Apply
+        detectRecordingFromToken(publishToken);
     });
+
+    // ── Recording Detection from JWT Token ──
+    function detectRecordingFromToken(token) {
+        if (!token) return;
+        try {
+            const parts = token.split('.');
+            if (parts.length < 2) return;
+            // Handle base64url encoding: replace URL-safe chars and add padding
+            let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            while (b64.length % 4) b64 += '=';
+            const payload = JSON.parse(atob(b64));
+            const canRecord = payload.record === true || payload.allowRecord === true || payload.allowRecording === true;
+            console.log('[Recording] Token decoded, canRecord:', canRecord);
+            const recordBtn = document.getElementById('recordBtn');
+            if (canRecord && recordBtn) {
+                recordBtn.classList.remove('d-none');
+                recordBtn.classList.add('record-armed');
+                recordBtn.textContent = 'Rec';
+            }
+        } catch (e) {
+            console.warn('[Recording] Could not decode token:', e.message);
+        }
+    }
+    // Check on initial page load if token was provided via URL
+    if (publishToken) {
+        detectRecordingFromToken(publishToken);
+    }
 
 
     // Screen sharing logic with proper integration
@@ -985,6 +1015,47 @@ document.addEventListener("DOMContentLoaded", async (event) => {
     // Attach it once, right after you create/build the publisher:
     millicastPublishUserMedia.on('broadcastEvent', onBroadcastEvent);
 
+    // ── Ambisonic SDP Transform for multiopus ──
+    const AMBISONIC_ORDERS = {
+        none:  null,
+        foa:   { channels: 4,  label: 'FOA (4ch)',  order: 1 },
+        soa:   { channels: 9,  label: 'SOA (9ch)',  order: 2 },
+        toa:   { channels: 16, label: 'TOA (16ch)', order: 3 },
+        '5.1': { channels: 6,  label: '5.1 Surround', order: null },
+    };
+    let activeAmbisonicOrder = 'none';
+
+    function getAmbisonicSDPTransform() {
+        if (activeAmbisonicOrder === 'none' || !AMBISONIC_ORDERS[activeAmbisonicOrder]) return null;
+        const config = AMBISONIC_ORDERS[activeAmbisonicOrder];
+        return function(sdp) {
+            console.log(`[Ambisonic] Applying SDP transform for ${config.label}`);
+            // Add multiopus fmtp for the audio m-line
+            const lines = sdp.split('\r\n');
+            const out = [];
+            let inAudio = false;
+            for (let i = 0; i < lines.length; i++) {
+                out.push(lines[i]);
+                if (lines[i].startsWith('m=audio')) {
+                    inAudio = true;
+                } else if (lines[i].startsWith('m=') && !lines[i].startsWith('m=audio')) {
+                    inAudio = false;
+                }
+                // After a=rtpmap for opus, inject channel_mapping for multiopus
+                if (inAudio && /^a=rtpmap:\d+ opus\/48000\/2/.test(lines[i])) {
+                    const pt = lines[i].match(/^a=rtpmap:(\d+)/)[1];
+                    // Replace the channel count in the rtpmap line
+                    out[out.length - 1] = `a=rtpmap:${pt} multiopus/48000/${config.channels}`;
+                    // Build channel_mapping based on channel count
+                    const mapping = Array.from({length: config.channels}, (_, j) => j).join(',');
+                    out.push(`a=fmtp:${pt} channel_mapping=${mapping};num_streams=${Math.ceil(config.channels/2)};coupled_streams=${Math.floor(config.channels/2)}`);
+                    console.log(`[Ambisonic] Injected multiopus fmtp: ${config.channels} channels, PT=${pt}`);
+                }
+            }
+            return out.join('\r\n');
+        };
+    }
+
     const BroadcastMillicastStream = async () => {
 
         if (!codec) {
@@ -1031,7 +1102,7 @@ document.addEventListener("DOMContentLoaded", async (event) => {
 
         try {
 
-            await millicastPublishUserMedia.connect({
+            const connectOpts = {
                 codec,
                 simulcast,
                 sourceId: validatedSourceId,
@@ -1043,11 +1114,30 @@ document.addEventListener("DOMContentLoaded", async (event) => {
                     'viewercount',  // triggers our viewercount handler
                     'stopped'       // triggers publishStop
                 ]
-            });
+            };
+
+            // Inject Ambisonic SDP transform if an order is active
+            const sdpXform = getAmbisonicSDPTransform();
+            if (sdpXform) {
+                connectOpts.peerConfig = { sdpTransform: sdpXform };
+                console.log('[Ambisonic] sdpTransform injected into peerConfig');
+            }
+
+            await millicastPublishUserMedia.connect(connectOpts);
 
             // — on success —
             isBroadcasting = true;
             console.log(`🚀 Broadcast started: ${streamName}`);
+
+            // Start stats collection when broadcast begins
+            startStatsCollection();
+
+            // Update recording button state if visible
+            const recBtn = document.getElementById('recordBtn');
+            if (recBtn && !recBtn.classList.contains('d-none')) {
+                recBtn.classList.remove('record-armed');
+                recBtn.classList.add('record-ready');
+            }
 
 
             await millicastPublishUserMedia.webRTCPeer.replaceTrack(vTracks[0]);
@@ -1057,11 +1147,88 @@ document.addEventListener("DOMContentLoaded", async (event) => {
             console.error("🛑 Broadcast Stopped:");
             //console.error("❌ Broadcast failed to start:", err);//Debug
             isBroadcasting = false;
+            // Stop stats collection on broadcast failure
+            stopStatsCollection();
             // fire your UI stop logic just in case
             broadcastHandler({ name: 'publishStop', data: {} });
         }
     };
 
+
+    // ── Stats Overlay (live stats under LIVE badge) ──
+    let statsInterval = null;
+
+    function startStatsCollection() {
+        if (statsInterval) return;
+        const overlay = document.getElementById('statsOverlay');
+        if (!overlay) return;
+        overlay.style.display = 'block';
+
+        statsInterval = setInterval(async () => {
+            try {
+                const peer = millicastPublishUserMedia.webRTCPeer;
+                if (!peer) return;
+
+                // Try multiple ways to get the RTCPeerConnection
+                let pc = null;
+                if (typeof peer.getRTCPeerConnection === 'function') {
+                    pc = peer.getRTCPeerConnection();
+                } else if (peer.peer) {
+                    pc = peer.peer;
+                } else if (typeof peer.getStats === 'function' && typeof peer.getSenders === 'function') {
+                    pc = peer;
+                }
+                if (!pc || typeof pc.getStats !== 'function') return;
+
+                const report = await pc.getStats();
+                let videoBitrate = 0, audioBitrate = 0;
+                let videoWidth = 0, videoHeight = 0, videoFps = 0;
+                let rtt = 0, jitter = 0, packetsLost = 0, availBw = 0;
+
+                report.forEach(stat => {
+                    if (stat.type === 'outbound-rtp' && stat.kind === 'video') {
+                        videoBitrate = Math.round((stat.bytesSent * 8) / ((stat.timestamp - (stat._prevTimestamp || stat.timestamp)) || 1000));
+                        videoWidth = stat.frameWidth || 0;
+                        videoHeight = stat.frameHeight || 0;
+                        videoFps = stat.framesPerSecond || 0;
+                        packetsLost = stat.packetsLost || 0;
+                    }
+                    if (stat.type === 'outbound-rtp' && stat.kind === 'audio') {
+                        audioBitrate = Math.round((stat.bytesSent * 8) / ((stat.timestamp - (stat._prevTimestamp || stat.timestamp)) || 1000));
+                    }
+                    if (stat.type === 'candidate-pair' && stat.state === 'succeeded') {
+                        rtt = Math.round((stat.currentRoundTripTime || 0) * 1000);
+                        availBw = Math.round((stat.availableOutgoingBitrate || 0) / 1000);
+                    }
+                    if (stat.type === 'remote-inbound-rtp') {
+                        jitter = Math.round((stat.jitter || 0) * 1000);
+                        if (stat.packetsLost) packetsLost = stat.packetsLost;
+                    }
+                });
+
+                overlay.innerHTML = `
+                    <div class="stats-row"><span class="stats-label">Video:</span> <span class="stats-value stats-ok">${videoBitrate} kbps</span></div>
+                    <div class="stats-row"><span class="stats-label">Audio:</span> <span class="stats-value stats-ok">${audioBitrate} kbps</span></div>
+                    <div class="stats-row"><span class="stats-label">Res:</span> <span class="stats-value stats-ok">${videoWidth}x${videoHeight} @${videoFps}fps</span></div>
+                    <div class="stats-row"><span class="stats-label">Avail BW:</span> <span class="stats-value ${availBw < 1000 ? 'stats-bad' : 'stats-ok'}">${availBw} kbps</span></div>
+                    <div class="stats-row"><span class="stats-label">RTT:</span> <span class="stats-value ${rtt > 200 ? 'stats-bad' : 'stats-ok'}">${rtt} ms</span></div>
+                    <div class="stats-row"><span class="stats-label">Jitter:</span> <span class="stats-value ${jitter > 30 ? 'stats-bad' : 'stats-ok'}">${jitter} ms</span></div>
+                    <div class="stats-row"><span class="stats-label">Pkt Loss:</span> <span class="stats-value ${packetsLost > 0 ? 'stats-bad' : 'stats-ok'}">${packetsLost}</span></div>
+                `;
+            } catch (e) {
+                console.warn('[Stats] Error collecting stats:', e.message);
+            }
+        }, 1000);
+    }
+
+    function stopStatsCollection() {
+        if (statsInterval) {
+            clearInterval(statsInterval);
+            statsInterval = null;
+        }
+        const overlay = document.getElementById('statsOverlay');
+        if (overlay) overlay.style.display = 'none';
+    }
 
     //Set Bitrate
     function setBitrate(bitrateKbps) {
@@ -2146,7 +2313,7 @@ document.addEventListener("DOMContentLoaded", async (event) => {
             if (isBroadcasting == false) {
                 pubBtn.style.backgroundColor = "green";
                 pubBtn.value = 'Start';
-
+                stopStatsCollection();
             }
             if (pubBtn.style.backgroundColor != "red") {
                 millicastPublishUserMedia.stop();
