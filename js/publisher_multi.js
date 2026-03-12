@@ -316,6 +316,8 @@ document.addEventListener("DOMContentLoaded", async (event) => {
                 true
             );
             console.log("millicastPublishUserMedia initialized with Stream Name:", dynamicStreamName);
+            // Keep window._publisher in sync for external feature modules
+            window._publisher = millicastPublishUserMedia;
         } catch (error) {
             console.error("Failed to initialize millicastPublishUserMedia:", error);
         }

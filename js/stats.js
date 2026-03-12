@@ -7,15 +7,18 @@
  * Hooks into publisher_multi.js via:
  *   - window._publisher  (the MillicastPublishUserMedia instance)
  *   - window events: 'publisherBroadcastStart' / 'publisherBroadcastStop'
+ *   - Fallback: polls LIVE badge visibility to auto-detect broadcast state
  */
 
 (function () {
     'use strict';
 
-    let statsInterval = null;
-    let prevVideoBytes = 0;
-    let prevAudioBytes = 0;
-    let prevTimestamp = 0;
+    var statsInterval = null;
+    var pollInterval = null;
+    var prevVideoBytes = 0;
+    var prevAudioBytes = 0;
+    var prevTimestamp = 0;
+    var isCollecting = false;
 
     function getOverlay() {
         return document.getElementById('statsOverlay');
@@ -25,9 +28,9 @@
      * Try multiple access patterns to get the underlying RTCPeerConnection.
      */
     function getRTCPeerConnection() {
-        const pub = window._publisher;
+        var pub = window._publisher;
         if (!pub) return null;
-        const peer = pub.webRTCPeer;
+        var peer = pub.webRTCPeer;
         if (!peer) return null;
         if (typeof peer.getRTCPeerConnection === 'function') return peer.getRTCPeerConnection();
         if (peer.peer) return peer.peer;
@@ -36,26 +39,27 @@
     }
 
     function startStats() {
-        if (statsInterval) return;
-        const overlay = getOverlay();
+        if (isCollecting) return;
+        isCollecting = true;
+        var overlay = getOverlay();
         if (!overlay) return;
 
-        // Reset cumulative counters
         prevVideoBytes = 0;
         prevAudioBytes = 0;
         prevTimestamp = 0;
 
         overlay.style.display = 'block';
+        console.log('[Stats] Starting stats collection');
 
-        statsInterval = setInterval(async () => {
+        statsInterval = setInterval(async function () {
             try {
-                const pc = getRTCPeerConnection();
+                var pc = getRTCPeerConnection();
                 if (!pc || typeof pc.getStats !== 'function') return;
 
-                const report = await pc.getStats();
-                let videoBytes = 0, audioBytes = 0, timestamp = 0;
-                let videoWidth = 0, videoHeight = 0, videoFps = 0;
-                let rtt = 0, jitter = 0, packetsLost = 0, availBw = 0;
+                var report = await pc.getStats();
+                var videoBytes = 0, audioBytes = 0, timestamp = 0;
+                var videoWidth = 0, videoHeight = 0, videoFps = 0;
+                var rtt = 0, jitter = 0, packetsLost = 0, availBw = 0;
 
                 report.forEach(function (stat) {
                     if (stat.type === 'outbound-rtp' && stat.kind === 'video') {
@@ -79,10 +83,9 @@
                     }
                 });
 
-                // Calculate bitrate from cumulative byte counters
-                let videoBitrate = 0, audioBitrate = 0;
+                var videoBitrate = 0, audioBitrate = 0;
                 if (prevTimestamp > 0 && timestamp > prevTimestamp) {
-                    const dtSec = (timestamp - prevTimestamp) / 1000;
+                    var dtSec = (timestamp - prevTimestamp) / 1000;
                     videoBitrate = Math.round(((videoBytes - prevVideoBytes) * 8) / dtSec / 1000);
                     audioBitrate = Math.round(((audioBytes - prevAudioBytes) * 8) / dtSec / 1000);
                 }
@@ -110,15 +113,45 @@
             clearInterval(statsInterval);
             statsInterval = null;
         }
+        isCollecting = false;
         prevVideoBytes = 0;
         prevAudioBytes = 0;
         prevTimestamp = 0;
         var overlay = getOverlay();
-        if (overlay) overlay.style.display = 'none';
+        if (overlay) {
+            overlay.style.display = 'none';
+            overlay.innerHTML = '';
+        }
+        console.log('[Stats] Stopped stats collection');
     }
 
     // Listen for broadcast lifecycle events from publisher_multi.js
     window.addEventListener('publisherBroadcastStart', startStats);
     window.addEventListener('publisherBroadcastStop', stopStats);
+
+    // Fallback: poll the LIVE badge visibility every 2s to detect broadcast state.
+    // This catches cases where the custom event fires before stats.js loads
+    // (e.g. module scripts execute asynchronously).
+    function pollLiveBadge() {
+        var liveBadge = document.getElementById('liveBadge');
+        if (!liveBadge) return;
+        var isLive = !liveBadge.classList.contains('hidden');
+        if (isLive && !isCollecting) {
+            console.log('[Stats] Detected LIVE badge visible - starting stats (fallback)');
+            startStats();
+        } else if (!isLive && isCollecting) {
+            console.log('[Stats] Detected LIVE badge hidden - stopping stats (fallback)');
+            stopStats();
+        }
+    }
+
+    // Start polling after DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () {
+            pollInterval = setInterval(pollLiveBadge, 2000);
+        });
+    } else {
+        pollInterval = setInterval(pollLiveBadge, 2000);
+    }
 
 })();
