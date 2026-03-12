@@ -19,91 +19,48 @@
     var prevAudioBytes = 0;
     var prevTimestamp = 0;
     var isCollecting = false;
-    var peerFound = false;
 
     function getOverlay() {
         return document.getElementById('statsOverlay');
     }
 
     /**
-     * Try every known access pattern to get the underlying RTCPeerConnection
-     * from the Millicast SDK's Publish / PeerConnection wrapper.
+     * Get the underlying RTCPeerConnection from the Millicast SDK.
+     *
+     * The SDK structure is:
+     *   window._publisher  →  Publish instance (extends EventEmitter)
+     *     .getRTCPeerConnection()  →  calls this.webRTCPeer.getRTCPeer()
+     *     .webRTCPeer  →  PeerConnection wrapper
+     *       .getRTCPeer()  →  actual RTCPeerConnection
+     *       .peer  →  actual RTCPeerConnection (internal)
      */
     function getRTCPeerConnection() {
         var pub = window._publisher;
-        if (!pub) {
-            if (!peerFound) console.log('[Stats] window._publisher not set yet');
-            return null;
+        if (!pub) return null;
+
+        // Pattern 1: Publish.getRTCPeerConnection() — the official SDK method
+        if (typeof pub.getRTCPeerConnection === 'function') {
+            var pc = pub.getRTCPeerConnection();
+            if (pc) return pc;
         }
 
+        // Pattern 2: webRTCPeer.getRTCPeer() — direct wrapper access
         var peer = pub.webRTCPeer;
-        if (!peer) {
-            if (!peerFound) console.log('[Stats] webRTCPeer not available yet');
-            return null;
+        if (!peer) return null;
+        if (typeof peer.getRTCPeer === 'function') {
+            var pc2 = peer.getRTCPeer();
+            if (pc2) return pc2;
         }
 
-        // Log available properties once for debugging
-        if (!peerFound) {
-            console.log('[Stats] webRTCPeer found, type:', typeof peer);
-            console.log('[Stats] webRTCPeer keys:', Object.keys(peer));
-            if (peer.peer) console.log('[Stats] webRTCPeer.peer found, type:', typeof peer.peer);
-            if (peer.pc) console.log('[Stats] webRTCPeer.pc found, type:', typeof peer.pc);
-            if (peer.peerConnection) console.log('[Stats] webRTCPeer.peerConnection found');
-            console.log('[Stats] getRTCPeerConnection exists:', typeof peer.getRTCPeerConnection);
-            console.log('[Stats] getStats exists:', typeof peer.getStats);
-            console.log('[Stats] getSenders exists:', typeof peer.getSenders);
-        }
+        // Pattern 3: webRTCPeer.peer — internal property
+        if (peer.peer) return peer.peer;
 
-        var pc = null;
-
-        // Pattern 1: Millicast SDK getRTCPeerConnection() method
-        if (typeof peer.getRTCPeerConnection === 'function') {
-            pc = peer.getRTCPeerConnection();
-        }
-        // Pattern 2: Direct .peer property (Millicast PeerConnection wrapper)
-        if (!pc && peer.peer) {
-            pc = peer.peer;
-        }
-        // Pattern 3: .pc property
-        if (!pc && peer.pc) {
-            pc = peer.pc;
-        }
-        // Pattern 4: .peerConnection property
-        if (!pc && peer.peerConnection) {
-            pc = peer.peerConnection;
-        }
-        // Pattern 5: webRTCPeer itself is the RTCPeerConnection
-        if (!pc && typeof peer.getStats === 'function' && typeof peer.getSenders === 'function') {
-            pc = peer;
-        }
-        // Pattern 6: Check all own properties for an RTCPeerConnection instance
-        if (!pc) {
-            var keys = Object.keys(peer);
-            for (var i = 0; i < keys.length; i++) {
-                var val = peer[keys[i]];
-                if (val && typeof val === 'object' && typeof val.getStats === 'function' && typeof val.getSenders === 'function') {
-                    if (!peerFound) console.log('[Stats] Found RTCPeerConnection at webRTCPeer.' + keys[i]);
-                    pc = val;
-                    break;
-                }
-            }
-        }
-
-        if (pc && !peerFound) {
-            peerFound = true;
-            console.log('[Stats] RTCPeerConnection acquired successfully');
-        }
-        if (!pc && !peerFound) {
-            console.log('[Stats] Could not find RTCPeerConnection from webRTCPeer');
-        }
-
-        return pc;
+        return null;
     }
 
     function startStats() {
         if (isCollecting) return;
         isCollecting = true;
-        peerFound = false;
         var overlay = getOverlay();
         if (!overlay) return;
 
@@ -117,7 +74,10 @@
         statsInterval = setInterval(async function () {
             try {
                 var pc = getRTCPeerConnection();
-                if (!pc || typeof pc.getStats !== 'function') return;
+                if (!pc || typeof pc.getStats !== 'function') {
+                    console.log('[Stats] Waiting for RTCPeerConnection...');
+                    return;
+                }
 
                 var report = await pc.getStats();
                 var videoBytes = 0, audioBytes = 0, timestamp = 0;
@@ -177,7 +137,6 @@
             statsInterval = null;
         }
         isCollecting = false;
-        peerFound = false;
         prevVideoBytes = 0;
         prevAudioBytes = 0;
         prevTimestamp = 0;
