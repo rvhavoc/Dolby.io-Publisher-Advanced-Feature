@@ -1,5 +1,4 @@
 "use strict";
-import './publisher.js';
 /**
  * @class MillicastMedia
  * @classdesc It's in charge of the devices, their respective streams, and the states of those streams.

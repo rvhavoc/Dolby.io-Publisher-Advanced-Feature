@@ -261,6 +261,8 @@ document.addEventListener("DOMContentLoaded", async (event) => {
         return Director.getPublisher(publishToken, streamName, validatedSourceId);
     };
     const millicastPublishUserMedia = window.millicastPublish = await MillicastPublishUserMedia.build({ streamName }, tokenGenerator, false)
+    // Expose the REAL publisher instance for external feature modules (stats.js, ambisonic.js)
+    window._publisher = millicastPublishUserMedia;
     //Get MediaStream
     const options = {};
     let selectedBandwidthBtn = document.querySelector('#bandwidthMenuButton');
