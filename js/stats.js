@@ -4,142 +4,191 @@
  * Displays packet loss, bitrate, jitter, and available outgoing bandwidth
  * in a transparent overlay positioned under the LIVE badge (top-left).
  *
+ * Uses the Millicast SDK's built-in stats event:
+ *   publisher.webRTCPeer.on('stats', callback)
+ * which fires every second with parsed WebRTC statistics.
+ *
  * Hooks into publisher_multi.js via:
  *   - window._publisher  (the MillicastPublishUserMedia instance)
- *   - window events: 'publisherBroadcastStart' / 'publisherBroadcastStop'
  *   - Fallback: polls LIVE badge visibility to auto-detect broadcast state
  */
 
 (function () {
     'use strict';
 
-    var statsInterval = null;
-    var pollInterval = null;
-    var prevVideoBytes = 0;
-    var prevAudioBytes = 0;
-    var prevTimestamp = 0;
     var isCollecting = false;
+    var pollInterval = null;
+    var statsListenerAttached = false;
 
     function getOverlay() {
         return document.getElementById('statsOverlay');
     }
 
     /**
-     * Get the underlying RTCPeerConnection from the Millicast SDK.
-     *
-     * The SDK structure is:
-     *   window._publisher  →  Publish instance (extends EventEmitter)
-     *     .getRTCPeerConnection()  →  calls this.webRTCPeer.getRTCPeer()
-     *     .webRTCPeer  →  PeerConnection wrapper
-     *       .getRTCPeer()  →  actual RTCPeerConnection
-     *       .peer  →  actual RTCPeerConnection (internal)
+     * Render stats data into the overlay.
+     * Accepts the parsed stats object emitted by the SDK's 'stats' event.
      */
-    function getRTCPeerConnection() {
-        var pub = window._publisher;
-        if (!pub) return null;
+    function renderStats(stats) {
+        var overlay = getOverlay();
+        if (!overlay) return;
 
-        // Pattern 1: Publish.getRTCPeerConnection() — the official SDK method
-        if (typeof pub.getRTCPeerConnection === 'function') {
-            var pc = pub.getRTCPeerConnection();
-            if (pc) return pc;
+        // Extract values from SDK stats object
+        var videoBitrate = 0, audioBitrate = 0;
+        var videoWidth = 0, videoHeight = 0, videoFps = 0;
+        var rtt = 0, jitter = 0, packetsLost = 0, availBw = 0;
+
+        try {
+            // The SDK stats object structure varies by version.
+            // Try multiple known formats.
+
+            // Format 1: stats.video / stats.audio arrays (parsed format)
+            if (stats.video && stats.video.length > 0) {
+                var v = stats.video[0];
+                videoBitrate = Math.round((v.bitrate || 0) / 1000);
+                videoWidth = v.frameWidth || v.width || 0;
+                videoHeight = v.frameHeight || v.height || 0;
+                videoFps = v.framesPerSecond || v.fps || 0;
+                packetsLost = v.packetsLost || v.totalPacketsLost || 0;
+                jitter = Math.round((v.jitter || 0) * 1000);
+            }
+            if (stats.audio && stats.audio.length > 0) {
+                var a = stats.audio[0];
+                audioBitrate = Math.round((a.bitrate || 0) / 1000);
+                if (!jitter && a.jitter) jitter = Math.round(a.jitter * 1000);
+                if (!packetsLost && a.packetsLost) packetsLost = a.packetsLost;
+            }
+
+            // Format 2: stats.totalRoundTripTime or stats.currentRoundTripTime
+            if (stats.candidatePair || stats.selectedCandidatePair) {
+                var cp = stats.candidatePair || stats.selectedCandidatePair;
+                rtt = Math.round((cp.currentRoundTripTime || 0) * 1000);
+                availBw = Math.round((cp.availableOutgoingBitrate || 0) / 1000);
+            }
+
+            // Format 3: Flat stats properties
+            if (!rtt && stats.roundTripTime) rtt = Math.round(stats.roundTripTime * 1000);
+            if (!rtt && stats.currentRoundTripTime) rtt = Math.round(stats.currentRoundTripTime * 1000);
+            if (!availBw && stats.availableOutgoingBitrate) availBw = Math.round(stats.availableOutgoingBitrate / 1000);
+
+            // Format 4: raw stats with totalBitrate
+            if (!videoBitrate && stats.totalBitrate) videoBitrate = Math.round(stats.totalBitrate / 1000);
+            if (!videoBitrate && stats.bitrate) videoBitrate = Math.round(stats.bitrate / 1000);
+
+            // Format 5: output.video / output.audio (another SDK version format)
+            if (stats.output) {
+                if (stats.output.video && stats.output.video.length > 0) {
+                    var ov = stats.output.video[0];
+                    if (!videoBitrate) videoBitrate = Math.round((ov.bitrate || 0) / 1000);
+                    if (!videoWidth) videoWidth = ov.frameWidth || 0;
+                    if (!videoHeight) videoHeight = ov.frameHeight || 0;
+                    if (!videoFps) videoFps = ov.framesPerSecond || 0;
+                }
+                if (stats.output.audio && stats.output.audio.length > 0) {
+                    var oa = stats.output.audio[0];
+                    if (!audioBitrate) audioBitrate = Math.round((oa.bitrate || 0) / 1000);
+                }
+            }
+
+            // Format 6: raw property (contains the raw RTCStatsReport data)
+            if (stats.raw && typeof stats.raw.forEach === 'function') {
+                stats.raw.forEach(function (stat) {
+                    if (stat.type === 'outbound-rtp' && stat.kind === 'video') {
+                        if (!videoWidth) videoWidth = stat.frameWidth || 0;
+                        if (!videoHeight) videoHeight = stat.frameHeight || 0;
+                        if (!videoFps) videoFps = stat.framesPerSecond || 0;
+                    }
+                    if (stat.type === 'candidate-pair' && stat.state === 'succeeded') {
+                        if (!rtt) rtt = Math.round((stat.currentRoundTripTime || 0) * 1000);
+                        if (!availBw) availBw = Math.round((stat.availableOutgoingBitrate || 0) / 1000);
+                    }
+                    if (stat.type === 'remote-inbound-rtp') {
+                        if (!jitter) jitter = Math.round((stat.jitter || 0) * 1000);
+                        if (!packetsLost && stat.packetsLost) packetsLost = stat.packetsLost;
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn('[Stats] Error parsing stats:', e.message);
         }
 
-        // Pattern 2: webRTCPeer.getRTCPeer() — direct wrapper access
-        var peer = pub.webRTCPeer;
-        if (!peer) return null;
-        if (typeof peer.getRTCPeer === 'function') {
-            var pc2 = peer.getRTCPeer();
-            if (pc2) return pc2;
+        overlay.innerHTML =
+            '<div class="stats-row"><span class="stats-label">Video:</span> <span class="stats-value ' + (videoBitrate < 100 ? 'stats-bad' : 'stats-ok') + '">' + videoBitrate + ' kbps</span></div>' +
+            '<div class="stats-row"><span class="stats-label">Audio:</span> <span class="stats-value stats-ok">' + audioBitrate + ' kbps</span></div>' +
+            '<div class="stats-row"><span class="stats-label">Res:</span> <span class="stats-value stats-ok">' + videoWidth + 'x' + videoHeight + ' @' + videoFps + 'fps</span></div>' +
+            '<div class="stats-row"><span class="stats-label">Avail BW:</span> <span class="stats-value ' + (availBw > 0 && availBw < 1000 ? 'stats-bad' : 'stats-ok') + '">' + availBw + ' kbps</span></div>' +
+            '<div class="stats-row"><span class="stats-label">RTT:</span> <span class="stats-value ' + (rtt > 200 ? 'stats-bad' : 'stats-ok') + '">' + rtt + ' ms</span></div>' +
+            '<div class="stats-row"><span class="stats-label">Jitter:</span> <span class="stats-value ' + (jitter > 30 ? 'stats-bad' : 'stats-ok') + '">' + jitter + ' ms</span></div>' +
+            '<div class="stats-row"><span class="stats-label">Pkt Loss:</span> <span class="stats-value ' + (packetsLost > 0 ? 'stats-bad' : 'stats-ok') + '">' + packetsLost + '</span></div>';
+    }
+
+    /**
+     * Log the stats object structure once for debugging.
+     */
+    var loggedOnce = false;
+    function onStats(stats) {
+        if (!loggedOnce) {
+            loggedOnce = true;
+            console.log('[Stats] First stats event received. Keys:', Object.keys(stats));
+            console.log('[Stats] Full stats object:', JSON.stringify(stats, null, 2).substring(0, 2000));
         }
-
-        // Pattern 3: webRTCPeer.peer — internal property
-        if (peer.peer) return peer.peer;
-
-        return null;
+        renderStats(stats);
     }
 
     function startStats() {
         if (isCollecting) return;
         isCollecting = true;
+        loggedOnce = false;
         var overlay = getOverlay();
-        if (!overlay) return;
-
-        prevVideoBytes = 0;
-        prevAudioBytes = 0;
-        prevTimestamp = 0;
-
-        overlay.style.display = 'block';
+        if (overlay) overlay.style.display = 'block';
         console.log('[Stats] Starting stats collection');
+        attachStatsListener();
+    }
 
-        statsInterval = setInterval(async function () {
+    function attachStatsListener() {
+        if (statsListenerAttached) return;
+        var pub = window._publisher;
+        if (!pub) {
+            console.log('[Stats] window._publisher not available, retrying in 1s...');
+            setTimeout(attachStatsListener, 1000);
+            return;
+        }
+        var peer = pub.webRTCPeer;
+        if (!peer) {
+            console.log('[Stats] webRTCPeer not available, retrying in 1s...');
+            setTimeout(attachStatsListener, 1000);
+            return;
+        }
+
+        // Use SDK's built-in stats event
+        // Per SDK docs: publisher.webRTCPeer.on('stats', callback)
+        peer.on('stats', onStats);
+        statsListenerAttached = true;
+        console.log('[Stats] Attached stats listener to webRTCPeer');
+
+        // If stats are not auto-initialized, try to start them
+        if (typeof peer.initStats === 'function') {
             try {
-                var pc = getRTCPeerConnection();
-                if (!pc || typeof pc.getStats !== 'function') {
-                    console.log('[Stats] Waiting for RTCPeerConnection...');
-                    return;
-                }
-
-                var report = await pc.getStats();
-                var videoBytes = 0, audioBytes = 0, timestamp = 0;
-                var videoWidth = 0, videoHeight = 0, videoFps = 0;
-                var rtt = 0, jitter = 0, packetsLost = 0, availBw = 0;
-
-                report.forEach(function (stat) {
-                    if (stat.type === 'outbound-rtp' && stat.kind === 'video') {
-                        videoBytes = stat.bytesSent || 0;
-                        timestamp = stat.timestamp || 0;
-                        videoWidth = stat.frameWidth || 0;
-                        videoHeight = stat.frameHeight || 0;
-                        videoFps = stat.framesPerSecond || 0;
-                        packetsLost = stat.packetsLost || 0;
-                    }
-                    if (stat.type === 'outbound-rtp' && stat.kind === 'audio') {
-                        audioBytes = stat.bytesSent || 0;
-                    }
-                    if (stat.type === 'candidate-pair' && stat.state === 'succeeded') {
-                        rtt = Math.round((stat.currentRoundTripTime || 0) * 1000);
-                        availBw = Math.round((stat.availableOutgoingBitrate || 0) / 1000);
-                    }
-                    if (stat.type === 'remote-inbound-rtp') {
-                        jitter = Math.round((stat.jitter || 0) * 1000);
-                        if (stat.packetsLost) packetsLost = stat.packetsLost;
-                    }
-                });
-
-                var videoBitrate = 0, audioBitrate = 0;
-                if (prevTimestamp > 0 && timestamp > prevTimestamp) {
-                    var dtSec = (timestamp - prevTimestamp) / 1000;
-                    videoBitrate = Math.round(((videoBytes - prevVideoBytes) * 8) / dtSec / 1000);
-                    audioBitrate = Math.round(((audioBytes - prevAudioBytes) * 8) / dtSec / 1000);
-                }
-                prevVideoBytes = videoBytes;
-                prevAudioBytes = audioBytes;
-                prevTimestamp = timestamp;
-
-                overlay.innerHTML =
-                    '<div class="stats-row"><span class="stats-label">Video:</span> <span class="stats-value ' + (videoBitrate < 100 && prevTimestamp > 0 ? 'stats-bad' : 'stats-ok') + '">' + videoBitrate + ' kbps</span></div>' +
-                    '<div class="stats-row"><span class="stats-label">Audio:</span> <span class="stats-value stats-ok">' + audioBitrate + ' kbps</span></div>' +
-                    '<div class="stats-row"><span class="stats-label">Res:</span> <span class="stats-value stats-ok">' + videoWidth + 'x' + videoHeight + ' @' + videoFps + 'fps</span></div>' +
-                    '<div class="stats-row"><span class="stats-label">Avail BW:</span> <span class="stats-value ' + (availBw > 0 && availBw < 1000 ? 'stats-bad' : 'stats-ok') + '">' + availBw + ' kbps</span></div>' +
-                    '<div class="stats-row"><span class="stats-label">RTT:</span> <span class="stats-value ' + (rtt > 200 ? 'stats-bad' : 'stats-ok') + '">' + rtt + ' ms</span></div>' +
-                    '<div class="stats-row"><span class="stats-label">Jitter:</span> <span class="stats-value ' + (jitter > 30 ? 'stats-bad' : 'stats-ok') + '">' + jitter + ' ms</span></div>' +
-                    '<div class="stats-row"><span class="stats-label">Pkt Loss:</span> <span class="stats-value ' + (packetsLost > 0 ? 'stats-bad' : 'stats-ok') + '">' + packetsLost + '</span></div>';
-
+                peer.initStats();
+                console.log('[Stats] Called initStats() on webRTCPeer');
             } catch (e) {
-                console.warn('[Stats] Error collecting stats:', e.message);
+                // Already initialized, ignore
             }
-        }, 1000);
+        }
     }
 
     function stopStats() {
-        if (statsInterval) {
-            clearInterval(statsInterval);
-            statsInterval = null;
-        }
         isCollecting = false;
-        prevVideoBytes = 0;
-        prevAudioBytes = 0;
-        prevTimestamp = 0;
+        loggedOnce = false;
+
+        // Remove stats listener
+        if (statsListenerAttached) {
+            var pub = window._publisher;
+            if (pub && pub.webRTCPeer) {
+                pub.webRTCPeer.removeListener('stats', onStats);
+            }
+            statsListenerAttached = false;
+        }
+
         var overlay = getOverlay();
         if (overlay) {
             overlay.style.display = 'none';
