@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dolby.io Publisher - Advanced Feature</title>
+    <meta charset="utf-8">
+    <link rel="icon" type="image/x-icon" href="images/dolby.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, maximum-scale=10.0, user-scalable=1">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css"
+          integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.3.1/css/all.css"
+          integrity="sha384-mzrmE5qonljUremFsqc01SB46JvROS7bZs3IO2EmfFsd15uHvIt+Y8vEf7N7fWAU"
+          crossorigin="anonymous">
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,400i,600,700" rel="stylesheet">
+    <link rel="stylesheet" href="css/index.css">
+
+    <!-- Millicast SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@millicast/sdk@latest/dist/millicast.umd.js"></script>
+</head>
+<body>
+
+    <!-- Orientation notices -->
+    <div class="turnDeviceNotification"><img class="w-100" src="images/do-landscape-icon.png"></div>
+    <div class="turnDeviceNotification notification-margin-top"><img class="w-100" src="images/do-landscape-icon-wide.png"></div>
+
+    <!-- Stream Configuration Panel -->
+    <div id="streamConfigPanel">
+        <input type="text" id="streamId" class="form-control form-control-sm" placeholder="accountId/streamName" style="width:200px;" />
+        <input type="text" id="publishToken" class="form-control form-control-sm" placeholder="Publishing Token" style="width:200px;" />
+        <button id="applyConfig" class="btn btn-sm btn-primary">Apply</button>
+    </div>
+
+    <div id="publishView">
+
+        <!-- Screen share banner -->
+        <div id="shareBanner" class="hidden">
+            <span>Screen sharing active</span>
+            <button id="stopShareBtn" class="btn btn-sm btn-warning">Stop Sharing</button>
+        </div>
+
+        <!-- Video Window -->
+        <section id="vidView">
+            <div id="vidContainer">
+                <video id="vidWin" autoplay muted playsinline></video>
+                <!-- Hidden compositing elements -->
+                <video id="screenVideo" style="display:none"></video>
+                <video id="cameraVideo" style="display:none"></video>
+                <canvas id="compositeCanvas" style="display:none"></canvas>
+
+                <!-- Stats Overlay -->
+                <div id="statsOverlay"></div>
+            </div>
+        </section>
+
+        <!-- Overlay controls -->
+        <div id="controlDisplay">
+
+            <div id="topFade" class="fixed-top vid-fade blk-fade-top-bottom"></div>
+            <div id="btmFade" class="fixed-bottom vid-fade blk-fade-bottom-top"></div>
+
+            <!-- LIVE / READY badges -->
+            <div id="airIndicatorView" class="w-100 d-flex justify-content-start">
+                <div id="readyBadge" class="badges btn-group" role="group">
+                    <span class="btn btn-sm btn-light ignore-mouse">READY</span>
+                </div>
+                <div id="liveBadge" class="badges btn-group hidden" role="group">
+                    <span class="btn btn-sm btn-danger ignore-mouse">LIVE</span>
+                    <span class="btn btn-sm btn-light ignore-mouse"><i class="fas fa-eye"></i> <span id="viewerCount">0</span></span>
+                </div>
+            </div>
+
+            <!-- Settings cog -->
+            <img id="cogBtn" src="images/cog.png" alt="Settings">
+
+            <!-- Settings panel (hidden by default) -->
+            <div id="settingsPanel" class="hidden">
+                <h5 class="settings-title">Media Settings</h5>
+
+                <!-- Bitrate -->
+                <div class="dropdown settings-dropdown">
+                    <button id="bitrateBtn" class="btn btn-secondary dropdown-toggle w-100 fs-15px" type="button"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        Bitrate
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-right" id="bitrateDropdown">
+                        <div class="dropdown-item fs-15px" data-rate="0">Unlimited</div>
+                        <div class="dropdown-item fs-15px" data-rate="10000">10 Mbps</div>
+                        <div class="dropdown-item fs-15px" data-rate="8000">8000 kbps</div>
+                        <div class="dropdown-item fs-15px" data-rate="6000">6000 kbps</div>
+                        <div class="dropdown-item fs-15px" data-rate="4000">4000 kbps</div>
+                        <div class="dropdown-item fs-15px" data-rate="3000">3000 kbps</div>
+                        <div class="dropdown-item fs-15px" data-rate="2000">2000 kbps</div>
+                        <div class="dropdown-item fs-15px" data-rate="1500">1500 kbps</div>
+                        <div class="dropdown-item fs-15px" data-rate="1000">1000 kbps</div>
+                        <div class="dropdown-item fs-15px" data-rate="500">500 kbps</div>
+                        <div class="dropdown-item fs-15px" data-rate="250">250 kbps</div>
+                    </div>
+                </div>
+
+                <!-- Codec -->
+                <div class="dropdown settings-dropdown">
+                    <button id="codecBtn" class="btn btn-secondary dropdown-toggle w-100 fs-15px" type="button"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        Codec
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-right" id="codecDropdown">
+                        <div class="dropdown-item fs-15px" data-codec="h264">H.264</div>
+                        <div class="dropdown-item fs-15px" data-codec="vp8">VP8</div>
+                        <div class="dropdown-item fs-15px" data-codec="vp9">VP9</div>
+                        <div class="dropdown-item fs-15px" data-codec="h265">H.265</div>
+                        <div class="dropdown-item fs-15px" data-codec="av1">AV1</div>
+                    </div>
+                </div>
+
+                <!-- FPS -->
+                <div class="dropdown settings-dropdown">
+                    <button id="fpsBtn" class="btn btn-secondary dropdown-toggle w-100 fs-15px" type="button"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        FPS
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-right" id="fpsDropdown">
+                        <div class="dropdown-item fs-15px" data-fps="15">15</div>
+                        <div class="dropdown-item fs-15px" data-fps="24">24</div>
+                        <div class="dropdown-item fs-15px" data-fps="25">25</div>
+                        <div class="dropdown-item fs-15px" data-fps="30">30</div>
+                        <div class="dropdown-item fs-15px" data-fps="60">60</div>
+                    </div>
+                </div>
+
+                <!-- Aspect Ratio -->
+                <div class="dropdown settings-dropdown">
+                    <button id="aspectBtn" class="btn btn-secondary dropdown-toggle w-100 fs-15px" type="button"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        Aspect
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-right" id="aspectDropdown">
+                        <div class="dropdown-item fs-15px" data-aspect="1.777778">16:9</div>
+                        <div class="dropdown-item fs-15px" data-aspect="1.333333">4:3</div>
+                        <div class="dropdown-item fs-15px" data-aspect="1.0">1:1</div>
+                    </div>
+                </div>
+
+                <!-- Resolution -->
+                <div class="dropdown settings-dropdown">
+                    <button id="resolutionBtn" class="btn btn-secondary dropdown-toggle w-100 fs-15px" type="button"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        Resolution
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-right" id="resolutionDropdown">
+                        <div class="dropdown-item fs-15px" data-resolution="360">360p</div>
+                        <div class="dropdown-item fs-15px" data-resolution="480">480p</div>
+                        <div class="dropdown-item fs-15px" data-resolution="720">720p</div>
+                        <div class="dropdown-item fs-15px" data-resolution="1080">1080p</div>
+                        <div class="dropdown-item fs-15px" data-resolution="1440">2K</div>
+                        <div class="dropdown-item fs-15px" data-resolution="2160">4K</div>
+                    </div>
+                </div>
+
+                <!-- Simulcast -->
+                <div class="dropdown settings-dropdown">
+                    <button id="simulcastBtn" class="btn btn-secondary dropdown-toggle w-100 fs-15px" type="button"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        Simulcast
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-right" id="simulcastDropdown">
+                        <div class="dropdown-item fs-15px" data-simulcast="true">Enable</div>
+                        <div class="dropdown-item fs-15px" data-simulcast="false">Disable</div>
+                    </div>
+                </div>
+
+                <!-- Ambisonic / Spatial Audio -->
+                <div class="dropdown settings-dropdown">
+                    <button id="ambisonicBtn" class="btn btn-secondary dropdown-toggle w-100 fs-15px" type="button"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        Spatial Audio
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-right" id="ambisonicDropdown">
+                        <!-- Populated dynamically by ambisonic.js -->
+                    </div>
+                </div>
+
+                <!-- Source ID -->
+                <div class="settings-dropdown">
+                    <input type="text" class="form-control form-control-sm" id="sourceId" placeholder="SourceId" />
+                </div>
+            </div>
+
+            <!-- Bottom control bar -->
+            <section id="vidCtrlView" class="p-3">
+                <div id="ctrlUI" class="row no-gutters">
+
+                    <!-- MIC CONTROL -->
+                    <div class="col-4 col-xl-3 offset-xl-1">
+                        <div class="btn-group btn-block" role="group">
+                            <div class="btn-group dropup btn-block">
+                                <button id="micListBtn" class="btn btn-secondary btn-lg dropdown-toggle btn-block" type="button"
+                                        data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                    <p>Mic</p><span class="boxCover"></span>
+                                </button>
+                                <div id="micList" class="dropdown-menu dropdown-menu-left"></div>
+                            </div>
+                            <button id="muteAudioBtn" type="button" class="btn btn-secondary">
+                                <i class="fas fa-microphone"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- PUBLISH + RECORD -->
+                    <div id="publishSection" class="col-4 col-xl-4 px-1 px-sm-3">
+                        <div class="publish-wrap">
+                            <button id="broadcastBtn" type="button" class="btn btn-success btn-lg btn-block">Go Live</button>
+                            <button id="recordBtn" type="button" class="btn record-btn hidden" aria-label="Record control">Rec</button>
+                        </div>
+
+                        <!-- Stats toggle -->
+                        <button id="statsBtn" type="button" class="btn btn-outline-info btn-sm stats-toggle-btn mt-1">
+                            <i class="fas fa-chart-bar"></i> Stats
+                        </button>
+                    </div>
+
+                    <!-- CAMERA CONTROL -->
+                    <div class="col-4 col-xl-3">
+                        <div class="btn-group btn-block w-100" role="group">
+                            <button id="muteVideoBtn" type="button" class="btn btn-secondary">
+                                <i class="fas fa-video"></i>
+                            </button>
+                            <div class="btn-group dropup btn-block">
+                                <button id="camListBtn" class="btn btn-secondary btn-lg dropdown-toggle btn-block" type="button"
+                                        data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                    <p>Camera</p><span class="boxCover"></span>
+                                </button>
+                                <div id="cameraList" class="dropdown-menu dropdown-menu-right">
+                                    <button class="dropdown-item" type="button" id="screenShareBtn">Screen Share</button>
+                                    <button class="dropdown-item" type="button" id="screenCompositeBtn">Screen + Camera</button>
+                                    <button class="dropdown-item" type="button" id="camScreenBtn">Camera + Screen PiP</button>
+                                    <button class="dropdown-item" type="button" id="dualCamBtn">Dual Camera</button>
+                                </div>
+                            </div>
+                            <!-- Share link -->
+                            <button id="shareBtn" class="btn btn-outline-light" title="Copy share link">
+                                <i class="fas fa-share-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.3/umd/popper.min.js"
+            integrity="sha384-ZMP7rVo3mIykV+2+9J3UJ46jBk0WLaUAdn689aCwoqbBJiSnjAK/l8WvCWPIPm49" crossorigin="anonymous"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/js/bootstrap.min.js"
+            integrity="sha384-ChfqqxuZUCnJSK3+MXmPNIyE6ZbWh2IMqE241rYiqJxyMiZ6OW/JmZQ5stwEULTy" crossorigin="anonymous"></script>
+
+    <!-- Modular entry point -->
+    <script type="module" src="js/main.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,572 @@
+
+body, html, button, input, select, textarea {
+  font-family : "OpenSans", Helvetica, Verdana, Arial, sans-serif;
+}
+body{
+  background-color: #fbfbfb;
+}
+html{
+  overflow-x: hidden;
+}
+
+.fs-15px{
+  font-size: 15px;
+}
+
+#vidContainer {
+  position: fixed;
+  bottom: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  background: #000;
+  text-align:center;
+  margin:0 auto;
+}
+
+#vidContainer video {
+  width: 100%;
+}
+
+#vidContainer video.vidWinBrowser {
+  height: 100%;
+}
+
+/* Black faded bars in control display */
+.blk-fade-top-bottom {
+  background: linear-gradient(rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0));
+}
+
+.blk-fade-bottom-top {
+  background: linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.8));
+}
+
+#controlDisplay .vid-fade {
+  width: 100%;
+  position: absolute;
+}
+
+#controlDisplay #topFade {
+  height: 100px;
+}
+#controlDisplay #btmFade {
+  height: 200px;
+}
+
+#shareSection .btn {
+  height: 50px;
+}
+
+.badges span {
+  font-weight: bold;
+  font-size: 13px;
+}
+
+#controlDisplay #overlayLogo, #guides .guide-view {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 90px;
+  margin: 0 auto;
+  text-align: center;
+}
+#controlDisplay #overlayLogo #coLogo {
+  width: 120px;
+  margin: auto;
+  padding: 6px 7px;
+}
+
+#guides #guide2, #guides #guide1 {
+  bottom: 140px;
+  width: 280px;
+}
+
+#guides .guide-view {
+  font-size: 0.77rem;
+  border: white 0.5px solid;
+  background: #000;
+  color: white;
+  border-radius: 10px;
+}
+
+#guides .guide-view p {
+  font-size: 12px;
+}
+
+/* Viewer Link */
+#shareView .btn-group {
+  height: 50px;
+}
+
+#vidCtrlView #viewerURL {
+  font-size: 0.76em;
+  color: #838391;
+  border: none;
+  background: white;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#vidCtrlView #viewerURL:active,
+#controlDisplay #viewerURL:hover {
+  background-color: white;
+  border-color: #BBB;
+}
+
+#vidCtrlView #viewerURL:focus,
+#vidCtrlView #copyBtn:focus {
+  box-shadow: none;
+}
+
+#vidCtrlView #copyBtn {
+  border: #BBB;
+  font-size: 16px;
+  color: #555;
+}
+
+#vidCtrlView {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  z-index: 50;
+  padding: 10px;
+}
+
+#camListBtn, #micListBtn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#camListBtn p, #micListBtn p, #bandwidthMenuButton {
+  font-size: 0.77rem;
+}
+
+/* Overage cover for lists */
+#vidCtrlView .boxCover {
+  height: 30px;
+  width: 30px;
+  background-color: white;
+  position: absolute;
+  right: 0;
+  top: 9px;
+}
+
+#vidCtrlView .dropdown-toggle {
+  position: relative;
+  height: 50px;
+  border-color: #5f6361;
+}
+
+#vidCtrlView .dropdown-toggle::after {
+  position: absolute;
+  top: 20px;
+  right: 15px;
+}
+
+#vidCtrlView .dropdown-menu .dropdown-item,
+#publishView .dropdown-menu .dropdown-item,
+#vidCtrlView .dropdown-toggle {
+  font-size: 0.77rem;
+  color: #5f6361;
+  background: white;
+  box-shadow: none;
+  outline: none;
+}
+
+#vidCtrlView .dropdown-toggle>p {
+  width: 10px;
+  margin: 0;
+}
+
+#vidCtrlView #muteAudioBtn,
+#vidCtrlView #muteVideoBtn {
+  width: 50px;
+}
+
+#vidCtrlView .dropdown-menu .dropdown-item.selected {
+  background: #ddd;
+}
+
+#vidCtrlView #broadcastBtn {
+  font-size: 0.85rem;
+  height: 50px;
+}
+
+#thanks{
+  padding-top: 15%;
+}
+
+#thanks #coLogo{
+  height: 15vh;
+}
+
+#thanks #signUpBtn{
+  font-size: 0.9rem;
+  min-height: 3.5em;
+  min-width: 9rem;
+}
+
+.btn-purp {
+  background: #40308e;
+  border: none;
+  color: white;
+}
+
+@media (max-height: 750px) {
+  #vidCtrlView {
+    margin-left: 0;
+    margin-right:0;
+  }
+}
+
+/* Settings */
+#controlDisplay #topFade {
+  z-index: 12;
+}
+
+#controlDisplay #btmFade {
+  z-index: 13;
+}
+
+.badges {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 16;
+}
+
+#controlDisplay #overlayLogo {
+  z-index: 17;
+}
+
+#vidCtrlView {
+  z-index: 18;
+}
+
+#guides {
+  z-index: 22;
+}
+
+/* Mouse / Cursor */
+.use-hand {
+  cursor: hand;
+}
+
+.ignore-mouse {
+  pointer-events: none;
+}
+
+/* Viewer Specific */
+#logo{
+  position: fixed;
+  z-index: 20;
+  width: 120px;
+}
+video{
+  top: -75px;
+  height:100%;
+  z-index: -1;
+}
+
+.footer {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  text-align: center;
+}
+
+.not-allowed{
+  cursor: not-allowed !important;
+}
+.nocursor{
+  cursor: none !important;
+}
+
+.visible {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity .25s linear;
+}
+.hidden {
+  display: none;
+}
+
+.btn.focus, .btn:focus{
+  box-shadow: none;
+  border-color: transparent;
+}
+
+.baseBtn:not(:disabled):not(.disabled).active:focus,
+.baseBtn:not(:disabled):not(.disabled):active:focus,
+.show>.baseBtn.dropdown-toggle:focus {
+  box-shadow: none;
+  border-color: transparent;
+}
+
+.baseBtn:hover {
+  color: rgb(180, 180, 180);
+  border-color: transparent;
+}
+
+.baseBtn:not(:disabled):not(.disabled).active,
+.baseBtn:not(:disabled):not(.disabled):active,
+.show>.baseBtn.dropdown-toggle {
+  color: rgb(180, 180, 180);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.baseBtn{
+  color: rgba(248, 249, 250, 0.51);
+  background-color: transparent;
+  background-image: none;
+  border-color: transparent;
+  font-size: 25px;
+  top: 0;
+  right: 0;
+  width: 75px;
+  height: 75px;
+}
+
+.btn-outline-light:not(:disabled):not(.disabled).active:focus,
+.btn-outline-light:not(:disabled):not(.disabled):active:focus,
+.show>.btn-outline-light.dropdown-toggle:focus {
+  box-shadow: none;
+}
+
+.btn-outline-light:hover {
+  color: #212529;
+  background-color: rgba(248, 249, 250, 0.51);
+  border-color: rgba(248, 249, 250, 0.51);
+}
+
+.btn-outline-light:not(:disabled):not(.disabled).active,
+.btn-outline-light:not(:disabled):not(.disabled):active,
+.show>.btn-outline-light.dropdown-toggle {
+  color: #212529;
+  background-color: rgba(248, 249, 250, 0.51);
+  border-color: rgba(248, 249, 250, 0.51);
+}
+
+.btn-outline-light {
+  color: rgba(248, 249, 250, 0.51);
+  background-color: transparent;
+  background-image: none;
+  border-color: rgba(248, 249, 250, 0.51);
+}
+
+@media (min-width: 414px) {
+  video{
+    top: -50px;
+  }
+  .baseBtn{
+    width: 50px;
+    height: 50px;
+  }
+}
+
+@media (min-width: 768px) {
+  video{
+    top: -75px;
+  }
+  .baseBtn{
+    width: 75px;
+    height: 75px;
+  }
+}
+
+/* Turn Device Notification */
+.turnDeviceNotification {
+  position: absolute;
+  margin-left: auto;
+  margin-right: auto;
+  left: 0;
+  right: 0;
+  height:100%;
+  width:100%;
+  z-index: 100;
+  display: none;
+  background-color: rgba(64, 48, 142, 0.3)
+}
+.notification-margin-top {
+  margin-top: -110px;
+}
+@media screen and (min-height: 411px) and (orientation: landscape) {
+  .notification-margin-top {
+    margin-top: -210px;
+  }
+}
+
+/* Cog / Settings button */
+#cogBtn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  z-index: 100;
+}
+
+/* Settings panel */
+#settingsPanel {
+  position: absolute;
+  top: 50px;
+  right: 10px;
+  background: rgba(30, 30, 30, 0.95);
+  padding: 15px;
+  border: 1px solid #444;
+  border-radius: 8px;
+  z-index: 101;
+  width: 170px;
+}
+
+.settings-title {
+  color: #ddd;
+  font-size: 14px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #555;
+  padding-bottom: 6px;
+}
+
+.settings-dropdown {
+  margin-bottom: 6px;
+}
+
+.settings-dropdown .btn {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.settings-dropdown .form-control-sm {
+  font-size: 12px;
+}
+
+/* Screen Share banner */
+#shareBanner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #333;
+  color: #fff;
+  padding: 8px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 9999;
+}
+
+/* Stream Config Panel */
+#streamConfigPanel {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* --- Publish + Record overlay layout --- */
+#publishSection {
+  padding-right: 8px;
+}
+
+.publish-wrap {
+  position: relative;
+  margin-right: 8px;
+}
+
+.publish-wrap #broadcastBtn {
+  width: 100%;
+}
+
+.publish-wrap .record-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 20%;
+  height: 100%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0 .3rem .3rem 0;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #fff;
+  border: none;
+  text-transform: uppercase;
+}
+
+/* Record button states */
+.record-armed {
+  background: #22422A;
+  color: #ffffff;
+}
+
+.record-ready {
+  background: #BF9E32;
+  color: #212529;
+}
+
+.record-live {
+  background: #8b0000;
+  color: #ffffff;
+}
+
+/* ============================================
+   Stats Overlay
+   ============================================ */
+#statsOverlay {
+  position: absolute;
+  top: 60px;
+  left: 20px;
+  width: 260px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #0f0;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  z-index: 200;
+  pointer-events: none;
+  display: none;
+  line-height: 1.6;
+}
+
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.stats-label {
+  color: #aaa;
+  font-weight: bold;
+}
+
+.stats-value {
+  color: #0f0;
+  text-align: right;
+}
+
+.stats-value.stats-warn {
+  color: #ff4444;
+}
+
+/* Stats toggle button */
+.stats-toggle-btn {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+}
+
+.stats-toggle-btn.active {
+  background: rgba(23, 162, 184, 0.3);
+  border-color: #17a2b8;
+}
