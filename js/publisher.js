@@ -1,4 +1,4 @@
-﻿import MillicastPublishUserMedia from './MillicastPublishUserMedia.js'
+import MillicastPublishUserMedia from './MillicastPublishUserMedia.js'
 const Director = millicast.Director
 const Logger = millicast.Logger
 navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
@@ -103,6 +103,8 @@ document.addEventListener("DOMContentLoaded", async () => {
             true
         );
         console.log("millicastPublishUserMedia initialized with Stream Name:", dynamicStreamName);
+        // Expose publisher instance for external feature modules (stats.js, ambisonic.js)
+        window._publisher = millicastPublishUserMedia;
     } catch (error) {
         console.error("Failed to initialize millicastPublishUserMedia:", error);
     }
@@ -175,7 +177,7 @@ document.addEventListener("DOMContentLoaded", async (event) => {
         });
     };
 
-//Mobile Orientation
+    //Mobile Orientation
     function handleOrientation() {
         let el = document.querySelector(".turnDeviceNotification");
         let elW = document.querySelector(".turnDeviceNotification.notification-margin-top");
@@ -258,7 +260,9 @@ document.addEventListener("DOMContentLoaded", async (event) => {
         console.log("Token Generator: Validated Source ID:", validatedSourceId);
         return Director.getPublisher(publishToken, streamName, validatedSourceId);
     };
-    const millicastPublishUserMedia = window.millicastPublish = await MillicastPublishUserMedia.build({ streamName }, tokenGenerator, true)
+    const millicastPublishUserMedia = window.millicastPublish = await MillicastPublishUserMedia.build({ streamName }, tokenGenerator, false)
+    // Expose the REAL publisher instance for external feature modules (stats.js, ambisonic.js)
+    window._publisher = millicastPublishUserMedia;
     //Get MediaStream
     const options = {};
     let selectedBandwidthBtn = document.querySelector('#bandwidthMenuButton');
@@ -314,6 +318,8 @@ document.addEventListener("DOMContentLoaded", async (event) => {
                 true
             );
             console.log("millicastPublishUserMedia initialized with Stream Name:", dynamicStreamName);
+            // Keep window._publisher in sync for external feature modules
+            window._publisher = millicastPublishUserMedia;
         } catch (error) {
             console.error("Failed to initialize millicastPublishUserMedia:", error);
         }
@@ -373,11 +379,11 @@ document.addEventListener("DOMContentLoaded", async (event) => {
             console.error("Failed to set max bitrate:", error);
         }
     }
-  
+
 
     //StreamID and Publishing Token
 
-    
+
     document.getElementById('applyStreamConfig').addEventListener('click', () => {
         const sid = document.getElementById('streamIdInput').value.trim();
         const tok = document.getElementById('tokenInput').value.trim();
@@ -410,16 +416,16 @@ document.addEventListener("DOMContentLoaded", async (event) => {
         const viewerField = document.getElementById('viewerLinkField');
         viewerField.value = `https://viewer.millicast.com/?streamId=${streamAccountId}/${streamName}`;
 
-    
 
-        console.log('Applied Stream ID:', streamAccountId,'/',streamName);
+
+        console.log('Applied Stream ID:', streamAccountId, '/', streamName);
         console.log('Applied Token:    ', publishToken);
     });
-   
+
 
     // Screen sharing logic with proper integration
- 
-  
+
+
     let isScreenSharing = false;
     let originalStream = null;
     let compositeAnimation = null;
@@ -457,7 +463,7 @@ document.addEventListener("DOMContentLoaded", async (event) => {
     }
 
     // Need to stop screen share properly to go back to default camera
-     let screenCleanup = null;
+    let screenCleanup = null;
 
     async function stopScreenShare() {
         if (screenCleanup) {
@@ -492,7 +498,7 @@ document.addEventListener("DOMContentLoaded", async (event) => {
                 // grab camera (video only)
                 cameraStream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        width: { ideal: 640, max: 854},
+                        width: { ideal: 640, max: 854 },
                         height: { ideal: 360, max: 480 },
                         frameRate: { ideal: 24, max: 30 }
                     },
@@ -639,7 +645,319 @@ document.addEventListener("DOMContentLoaded", async (event) => {
         const elSimulcastList = document.querySelectorAll("#simulcastMenu > .dropdown-item");
         elSimulcastList.forEach((el) => el.addEventListener("click", onToggleSimulcast));
     });
-    
+
+    //Reverse the Screen Share for Camera and Screen
+    // === Camera + Screen (reverse composite): camera full, screen PiP ===
+    async function startCameraPlusScreen() {
+        let screenStream, cameraStream, canvasStream;
+        let cleanup;
+
+        try {
+            // keep reference to the current stream
+            const originalStream = activeStream;
+            const oldAudio = (originalStream && originalStream.getAudioTracks()) || [];
+
+            // 1) get main CAMERA (no audio here — we’ll reuse/mix mic separately)
+            cameraStream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    width: { ideal: 1920, max: 3840 },
+                    height: { ideal: 1080, max: 2160 },
+                    frameRate: { ideal: 30, max: 60 },
+                    aspectRatio: 16 / 9
+                },
+                audio: false
+            });
+
+            // 2) get SCREEN with audio if available
+            screenStream = await navigator.mediaDevices.getDisplayMedia({
+                video: true,
+                audio: true      // Chrome tab/system audio when granted
+            });
+            const screenAudio = screenStream.getAudioTracks();
+
+            // 3) render both to hidden videos (you already use these IDs elsewhere)
+            const camVid = document.getElementById('cameraVideo');
+            const screenVid = document.getElementById('screenVideo');
+            camVid.srcObject = cameraStream;
+            screenVid.srcObject = screenStream;
+            await camVid.play().catch(() => { });
+            await screenVid.play().catch(() => { });
+
+            // 4) setup a canvas using CAMERA as the base (16:9)
+            const canvas = document.getElementById('compositeCanvas');
+            const ctx = canvas.getContext('2d');
+
+            const camSet = cameraStream.getVideoTracks()[0].getSettings();
+            canvas.width = camSet.width || 1280;
+            canvas.height = Math.floor(canvas.width * 9 / 16);
+
+            // size the SCREEN overlay (PiP) based on its own aspect
+            const scrSet = screenStream.getVideoTracks()[0].getSettings();
+            const scrAR = (scrSet.width && scrSet.height) ? scrSet.width / scrSet.height : (16 / 9);
+
+            // PiP kept smaller to avoid overconstrained issues
+            const pipW = Math.floor(canvas.width * 0.23);
+            const pipH = Math.floor(pipW / scrAR);
+
+            // default PiP position (bottom-right); honor window.pipCorner if you’re using it
+            const corner = (window.pipCorner || 'br').toLowerCase(); // 'tl','tr','bl','br'
+            let overlayX = (corner.includes('r')) ? (canvas.width - pipW - 22) : 22;
+            let overlayY = (corner.includes('b')) ? (canvas.height - pipH - 22) : 22;
+
+            // enable drag on preview video
+            const videoWin = document.getElementById('vidWin');
+            let dragging = false, offsetX = 0, offsetY = 0;
+            function mapToCanvas(clientX, clientY) {
+                const rect = videoWin.getBoundingClientRect();
+                const x = (clientX - rect.left) * (canvas.width / rect.width);
+                const y = (clientY - rect.top) * (canvas.height / rect.height);
+                return { x, y };
+            }
+            function onMouseMove(e) {
+                if (!dragging) return;
+                const { x, y } = mapToCanvas(e.clientX, e.clientY);
+                overlayX = Math.max(0, Math.min(canvas.width - pipW, x - offsetX));
+                overlayY = Math.max(0, Math.min(canvas.height - pipH, y - offsetY));
+            }
+            function onMouseUp() {
+                dragging = false;
+                window.removeEventListener('mousemove', onMouseMove);
+                window.removeEventListener('mouseup', onMouseUp);
+                videoWin.style.cursor = '';
+            }
+            videoWin.addEventListener('mousedown', (e) => {
+                const { x, y } = mapToCanvas(e.clientX, e.clientY);
+                if (x >= overlayX && x <= overlayX + pipW && y >= overlayY && y <= overlayY + pipH) {
+                    dragging = true;
+                    offsetX = x - overlayX;
+                    offsetY = y - overlayY;
+                    videoWin.style.cursor = 'move';
+                    window.addEventListener('mousemove', onMouseMove);
+                    window.addEventListener('mouseup', onMouseUp);
+                }
+            });
+
+            // 5) draw loop: camera full frame + screen PiP
+            function drawComposite() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                // base = CAMERA
+                ctx.drawImage(camVid, 0, 0, canvas.width, canvas.height);
+                // overlay = SCREEN
+                ctx.drawImage(screenVid, overlayX, overlayY, pipW, pipH);
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = '#fff';
+                ctx.strokeRect(overlayX, overlayY, pipW, pipH);
+                compositeAnimation = requestAnimationFrame(drawComposite);
+            }
+            drawComposite();
+
+            // 6) capture canvas as our video
+            canvasStream = canvas.captureStream(30);
+            const videoTracks = canvasStream.getVideoTracks();
+
+            // 7) mix audio: keep old mic + add screen audio (if permitted)
+            const mixedAudioTrack = await mixAudioTracks(screenAudio, oldAudio);
+
+            // 8) build + publish
+            const newStream = new MediaStream([...videoTracks, mixedAudioTrack]);
+            await replaceActiveStream(newStream);
+            activeMediaSource = 'camera'; // base is camera
+            isScreenSharing = true;
+            showBanner?.(); // if you show a banner
+
+            // 9) cleanup when screen stops
+            screenCleanup = async () => {
+                cancelAnimationFrame(compositeAnimation);
+                [screenStream, cameraStream].forEach(s => s && s.getTracks().forEach(t => t.stop()));
+                screenVid.srcObject = null;
+                camVid.srcObject = null;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                await replaceActiveStream(originalStream);
+                isScreenSharing = false;
+                hideBanner?.();
+            };
+            screenStream.getVideoTracks()[0].onended = screenCleanup;
+
+        } catch (err) {
+            console.error('startCameraPlusScreen error:', err);
+            if (cleanup) await cleanup();
+        }
+    }
+
+    // one-time binding for the new menu item:
+    document.addEventListener('DOMContentLoaded', () => {
+        const btn = document.getElementById('cameraScreenComposite');
+        if (btn && !btn.__wired) {
+            btn.addEventListener('click', () => startCameraPlusScreen());
+            btn.__wired = true;
+        }
+    });
+    /// Next Dual Camera
+    async function startDualCamera() {
+        let originalStream = window.activeStream || null;
+        let canvasStream = null, camAStream = null, camBStream = null, rafId = 0;
+
+        const stopStream = s => { try { s && s.getTracks().forEach(t => t.stop()); } catch { } };
+        const log = (...a) => console.log('[DualCam]', ...a);
+
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const cams = devices.filter(d => d.kind === 'videoinput');
+            if (cams.length < 1) { alert('No cameras available.'); return; }
+
+            // Determine primary (current active publishing video device if available)
+            const activeVid = window.millicastPublishUserMedia?.activeVideo;
+            const activeDevId = activeVid?.deviceId || null;
+            const primaryId = activeDevId || cams[0].deviceId;
+
+            // Determine PiP (user-chosen or auto-pick)
+            let pipId = (window.pipDeviceId && cams.some(c => c.deviceId === window.pipDeviceId))
+                ? window.pipDeviceId
+                : (cams.find(c => c.deviceId !== primaryId)?.deviceId || primaryId);
+
+            // ===== Open/Reuse Primary =====
+            // If our active stream is already from primaryId, REUSE it; don’t re-open.
+            const maybeActiveTrack = originalStream?.getVideoTracks?.()[0] || null;
+            const sameAsActive =
+                !!maybeActiveTrack &&
+                typeof maybeActiveTrack.getSettings === 'function' &&
+                (maybeActiveTrack.getSettings().deviceId === primaryId);
+
+            if (sameAsActive) {
+                // reuse the active stream
+                camAStream = new MediaStream([maybeActiveTrack]);
+                log('Primary uses existing active track.');
+            } else {
+                // stop any old local preview tracks that might be holding devices
+                try { originalStream?.getVideoTracks().forEach(t => t.stop()); } catch { }
+
+                // open primary camera fresh
+                try {
+                    camAStream = await navigator.mediaDevices.getUserMedia({
+                        video: {
+                            deviceId: { exact: primaryId },
+                            width: { ideal: 1920, max: 3840 },
+                            height: { ideal: 1080, max: 2160 },
+                            frameRate: { ideal: 30, max: 60 },
+                            aspectRatio: 16 / 9
+                        },
+                        audio: false
+                    });
+                } catch (err) {
+                    if (err?.name === 'NotReadableError') {
+                        log('Primary NotReadableError; retrying smaller…', err);
+                        camAStream = await navigator.mediaDevices.getUserMedia({
+                            video: { deviceId: { exact: primaryId }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+                            audio: false
+                        });
+                    } else {
+                        throw err;
+                    }
+                }
+            }
+
+            // ===== Open/Clone PiP =====
+            if (pipId === primaryId) {
+                // Same device → clone primary track
+                const primaryTrack = camAStream.getVideoTracks()[0];
+                const cloned = primaryTrack.clone();
+                camBStream = new MediaStream([cloned]);
+                log('PiP uses cloned track from primary.');
+            } else {
+                // different device → open downscaled
+                try {
+                    camBStream = await navigator.mediaDevices.getUserMedia({
+                        video: {
+                            deviceId: { exact: pipId },
+                            width: { ideal: 640, max: 854 },
+                            height: { ideal: 360, max: 480 },
+                            frameRate: { ideal: 24, max: 30 }
+                        },
+                        audio: false
+                    });
+                } catch (err) {
+                    if (err?.name === 'NotReadableError' || err?.name === 'OverconstrainedError') {
+                        log('PiP error; retry smaller…', err);
+                        camBStream = await navigator.mediaDevices.getUserMedia({
+                            video: {
+                                deviceId: { exact: pipId },
+                                width: { ideal: 320 }, height: { ideal: 180 }, frameRate: { ideal: 24 }
+                            },
+                            audio: false
+                        });
+                    } else {
+                        throw err;
+                    }
+                }
+            }
+
+            // ===== Composite to canvas =====
+            const vA = document.createElement('video');
+            const vB = document.createElement('video');
+            [vA, vB].forEach(v => { v.muted = true; v.playsInline = true; v.autoplay = true; });
+            vA.srcObject = camAStream; vB.srcObject = camBStream;
+            await vA.play().catch(() => { }); await vB.play().catch(() => { });
+
+            let canvas = document.getElementById('compositeCanvas');
+            if (!canvas) { canvas = Object.assign(document.createElement('canvas'), { id: 'compositeCanvas', style: 'display:none' }); document.body.appendChild(canvas); }
+            const ctx = canvas.getContext('2d');
+
+            const aSet = camAStream.getVideoTracks()[0].getSettings?.() || {};
+            canvas.width = aSet.width || 1280;
+            canvas.height = Math.floor(canvas.width * 9 / 16);
+
+            const bSet = camBStream.getVideoTracks()[0].getSettings?.() || {};
+            const arB = (bSet.width && bSet.height) ? (bSet.width / bSet.height) : (16 / 9);
+            const pipW = Math.floor(canvas.width * 0.23);
+            const pipH = Math.floor(pipW / arB);
+            let overlayX = canvas.width - pipW - 22;
+            let overlayY = canvas.height - pipH - 22;
+
+            function draw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(vA, 0, 0, canvas.width, canvas.height);
+                ctx.drawImage(vB, overlayX, overlayY, pipW, pipH);
+                ctx.lineWidth = 3; ctx.strokeStyle = '#fff';
+                ctx.strokeRect(overlayX, overlayY, pipW, pipH);
+                rafId = requestAnimationFrame(draw);
+            }
+            draw();
+
+            canvasStream = canvas.captureStream(30);
+            const vid = canvasStream.getVideoTracks()[0];
+
+            // keep your existing mic(s)
+            const oldAudio = originalStream?.getAudioTracks?.() || [];
+            let audioTrack = null;
+            if (typeof mixAudioTracks === 'function') {
+                audioTrack = await mixAudioTracks([], oldAudio);
+            } else {
+                audioTrack = oldAudio[0] || null;
+            }
+            const finalStream = new MediaStream(audioTrack ? [vid, audioTrack] : [vid]);
+
+            await replaceActiveStream(finalStream);
+            window.activeMediaSource = 'camera';
+
+            // Cleanup on track end
+            const cleanup = async () => {
+                try { cancelAnimationFrame(rafId); } catch { }
+                stopStream(camAStream); stopStream(camBStream);
+                try { await replaceActiveStream(originalStream); } catch { }
+            };
+            camAStream.getVideoTracks()[0].onended = cleanup;
+            camBStream.getVideoTracks()[0].onended = cleanup;
+
+        } catch (err) {
+            console.error('startDualCamera error:', err);
+            try { cancelAnimationFrame(rafId); } catch { }
+            try { stopStream(camAStream); stopStream(camBStream); } catch { }
+        }
+    }
+
+
+    //END 
+
     let selectedSimulcastBtn = document.querySelector('#simulcastMenuButton');
     let simulcast = false;
 
@@ -666,7 +984,7 @@ document.addEventListener("DOMContentLoaded", async (event) => {
                 break;
 
             // optionally handle other events:
-     
+
         }
     }
 
@@ -674,7 +992,7 @@ document.addEventListener("DOMContentLoaded", async (event) => {
     millicastPublishUserMedia.on('broadcastEvent', onBroadcastEvent);
 
     const BroadcastMillicastStream = async () => {
-     
+
         if (!codec) {
             console.error("Codec must be set before starting the broadcast.");
             return;
@@ -688,25 +1006,25 @@ document.addEventListener("DOMContentLoaded", async (event) => {
             return;
         }
 
-       
+
         // normalize sourceId
         const srcIn = document.getElementById('sourceId');
         let srcVal = srcIn?.value.trim() || '';
         if (srcVal === 'SourceId') srcVal = '';
         const validatedSourceId = srcVal;
 
-      
+
         const vTracks = activeStream.getVideoTracks();
         if (!vTracks.length) {
             console.error("No video tracks in activeStream; cannot publish.");
             return;
         }
 
-       
+
         let bandwidth = resolutionBitrateMap[resolution] || 2500;
         if (activeMediaSource === 'screen') bandwidth = 6000;
 
-      
+
         millicastPublishUserMedia.removeAllListeners?.('broadcastEvent');
         millicastPublishUserMedia.on('broadcastEvent', event => {
             if (event.name === 'publishStart' || event.name === 'publishStop') {
@@ -718,7 +1036,7 @@ document.addEventListener("DOMContentLoaded", async (event) => {
         });
 
         try {
-      
+
             await millicastPublishUserMedia.connect({
                 codec,
                 simulcast,
@@ -737,7 +1055,9 @@ document.addEventListener("DOMContentLoaded", async (event) => {
             isBroadcasting = true;
             console.log(`🚀 Broadcast started: ${streamName}`);
 
-        
+            // Notify external feature modules (stats.js, etc.)
+            window.dispatchEvent(new CustomEvent('publisherBroadcastStart'));
+
             await millicastPublishUserMedia.webRTCPeer.replaceTrack(vTracks[0]);
             console.log("✅ Video track replacement done.");
 
@@ -745,6 +1065,8 @@ document.addEventListener("DOMContentLoaded", async (event) => {
             console.error("🛑 Broadcast Stopped:");
             //console.error("❌ Broadcast failed to start:", err);//Debug
             isBroadcasting = false;
+            // Notify external feature modules
+            window.dispatchEvent(new CustomEvent('publisherBroadcastStop'));
             // fire your UI stop logic just in case
             broadcastHandler({ name: 'publishStop', data: {} });
         }
@@ -769,7 +1091,6 @@ document.addEventListener("DOMContentLoaded", async (event) => {
             }
         }
     }
-
 
     const onSetVideoBandwidth = async (evt) => {
         try {
@@ -862,7 +1183,6 @@ document.addEventListener("DOMContentLoaded", async (event) => {
     };
     //const updatedSettings = videoTrack.getSettings();
     //console.log("Updated track settings:", updatedSettings);
-
 
     //////aspectRatio
     const onSetVideoAspect = async (evt) => {
@@ -1230,7 +1550,7 @@ document.addEventListener("DOMContentLoaded", async (event) => {
         let a = true;
         if (!disableStereo) {
             a = {
-                channelCount: { ideal: 2 },
+                channelCount: { ideal: 6 },
                 echoCancellation: true
             }
         }
@@ -1286,28 +1606,6 @@ document.addEventListener("DOMContentLoaded", async (event) => {
             }
         });
 
-        //For the Viewer Link
-        /*
-        cpy.addEventListener('click', () => {
-            doCopy();
-            showGuide('guide2', false);
-        });
-
-        viewUrlEl.addEventListener('click', e => {
-            //do not open browser if mobile.
-           if (isMobile) {
-                return doCopy();
-            }
-       
-       let url = (viewUrlEl.textContent || viewUrlEl.innerText).trim();
-            //console.log('openViewer: ', url);
-            if (url.length === 0 || url === 'https://' || url === 'Must broadcast first') {
-                alert('You need to start a broadcast first.');
-                return false;
-            } else {
-                window.open(url, '_blank');
-            }
-        }); */
     }
     //Mic list to audio track to screen share
     /* Updated mic dropdown rebuild and highlighting */
@@ -1577,8 +1875,7 @@ document.addEventListener("DOMContentLoaded", async (event) => {
             });
         }
 
-
-        //Camera 
+        //Camera contols and list update.
         // Update camera list
         while (camsList.firstChild) {
             camsList.removeChild(camsList.firstChild);
@@ -1587,59 +1884,159 @@ document.addEventListener("DOMContentLoaded", async (event) => {
         const cams = data.videoinput || [];
         cams.forEach(device => {
             const item = document.createElement('button');
-            item.innerHTML = device.label || 'Camera';
-            item.classList = 'dropdown-item use-hand';
+            item.innerHTML = `📷 ${device.label || 'Camera'}`;
+            item.className = 'dropdown-item use-hand';
             item.id = device.deviceId;
             camsList.appendChild(item);
         });
 
-        // ...existing code that adds camera devices...
-
         // Add both screen share options:
         const screenShareItem = document.createElement('button');
         screenShareItem.innerHTML = '🖥️ Screen Share';
-        screenShareItem.classList = 'dropdown-item use-hand';
+        screenShareItem.className = 'dropdown-item use-hand';
         screenShareItem.id = 'screenShareOnly';
         camsList.appendChild(screenShareItem);
 
         const screenCameraCompositeItem = document.createElement('button');
-        screenCameraCompositeItem.innerHTML = '🖥️ Screen + Camera Overlay';
-        screenCameraCompositeItem.classList = 'dropdown-item use-hand';
+        screenCameraCompositeItem.innerHTML = '🖥️ 🎥 Screen + Camera Overlay';
+        screenCameraCompositeItem.className = 'dropdown-item use-hand';
         screenCameraCompositeItem.id = 'screenCameraComposite';
         camsList.appendChild(screenCameraCompositeItem);
 
+        // NEW: Camera + Screen (camera full, screen PiP)
+        const cameraScreenCompositeItem = document.createElement('button');
+        cameraScreenCompositeItem.innerHTML = '🎥 🖥️ Camera + Screen';
+        cameraScreenCompositeItem.className = 'dropdown-item use-hand';
+        cameraScreenCompositeItem.id = 'cameraScreenComposite';
+        camsList.appendChild(cameraScreenCompositeItem);
+
+        // NEW: Dual Camera (primary full, secondary PiP)
+        const dualCamItem = document.createElement('button');
+        dualCamItem.innerHTML = '🎥🎥 Dual Camera';
+        dualCamItem.className = 'dropdown-item use-hand';
+        dualCamItem.id = 'dualCamBtn';
+        camsList.appendChild(dualCamItem);
+
+        // PiP chooser section (lets you select the small camera for the two new modes)
+        const divider = document.createElement('div');
+        divider.className = 'dropdown-divider';
+        camsList.appendChild(divider);
+
+        const pipHdr = document.createElement('div');
+        pipHdr.className = 'dropdown-item disabled';
+        pipHdr.textContent = '— PiP (small camera) —';
+        camsList.appendChild(pipHdr);
+
+        cams.forEach(device => {
+            const pipBtn = document.createElement('button');
+            pipBtn.className = 'dropdown-item use-hand pip-choice';
+            pipBtn.setAttribute('data-device-id', device.deviceId);
+            pipBtn.textContent = `📌 ${device.label || 'Camera'}`;
+            camsList.appendChild(pipBtn);
+        });
 
         displayActiveDevice();
-    }
+        }
 
-
-    /// Add after displayDevices camList
+        /// Add after displayDevices camList
+        // One single click handler for the camera dropdown:
+    // One single click handler for the camera dropdown:
     camsList.addEventListener('click', async (e) => {
         const target = e.target;
         if (!target || !target.classList.contains('dropdown-item')) return;
 
         try {
-            // Special virtual device handling
+            // 0) PiP selection must not fall through to "real camera"
+            if (target.classList.contains('pip-choice')) {
+                const pipId = target.getAttribute('data-device-id') || '';
+                if (!pipId) {
+                    console.warn('PiP choice has no device id');
+                    return;
+                }
+                window.pipDeviceId = pipId;
+                // highlight chosen PiP
+                camsList.querySelectorAll('.pip-choice').forEach(b => b.classList.remove('active'));
+                target.classList.add('active');
+                console.log('PiP set to:', pipId);
+                return; // IMPORTANT: stop here; do NOT switch camera
+            }
+
+            // Special virtual options
             if (target.id === 'screenShareOnly') {
-                console.log("Switching to screen share (screen only)...");
+                console.log('Switching to screen share (screen only)…');
                 updateDropdownUI('Screen Share Only');
                 await startScreenShare('screenOnly');
                 return;
             }
+
             if (target.id === 'screenCameraComposite') {
-                console.log("Switching to screen share + camera overlay...");
+                console.log('Switching to screen share + camera overlay…');
                 updateDropdownUI('Screen + Camera Overlay');
                 await startScreenShare('composite');
                 return;
             }
 
-            // Handle real camera devices (everything else)
+            if (target.id === 'cameraScreenComposite') {
+                console.log('Camera + Screen (PiP)…');
+                updateDropdownUI('Camera + Screen (PiP)');
+                await startCameraPlusScreen();  // uses window.pipDeviceId
+                return;
+            }
+
+            if (target.id === 'dualCamBtn') {
+                console.log('Dual Camera (PiP)…');
+                updateDropdownUI('Dual Camera (PiP)');
+                await startDualCamera();        // uses window.pipDeviceId
+                return;
+            }
+
+            // 1) Real camera devices (MUST have a real deviceId in `id`)
+            if (!target.id) {
+                console.warn('Clicked item with no id; ignoring.');
+                return;
+            }
+
             console.log(`Switching to camera: ${target.id}`);
             activeMediaSource = 'camera';
 
-            const selectedCamera = [...camsList.children].find(item => item.id === target.id);
+            const selectedCamera = Array.from(camsList.querySelectorAll('button.dropdown-item'))
+                .find(item => item.id === target.id);
             if (!selectedCamera) {
-                console.warn("Selected camera not found in dropdown list.");
+                console.warn('Selected camera not found in dropdown list.');
+                return;
+            }
+
+            if (activeStream) activeStream.getTracks().forEach(t => t.stop());
+
+            // strip leading icon from the label if present
+            const labelText = target.textContent.replace(/^📷\s*/, '');
+            updateDropdownUI(labelText);
+
+            const cameraStream = await millicastPublishUserMedia.updateMediaStream('video', target.id);
+            activeStream = cameraStream;
+            videoWin.srcObject = cameraStream;
+
+            if (millicastPublishUserMedia.isActive && millicastPublishUserMedia.isActive()) {
+                const cameraTrack = cameraStream.getVideoTracks()[0];
+                await millicastPublishUserMedia.webRTCPeer.replaceTrack(cameraTrack);
+                console.log('Camera track replaced successfully.');
+            }
+
+            console.log(`Updated local preview and published camera to: ${labelText}`);
+        } catch (error) {
+            console.error('Error switching media source:', error);
+        }
+    });
+
+
+        navigator.mediaDevices.enumerateDevices().then(async (devices) => {
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+
+            // Avoid the default device
+            const firstRealCamera = videoDevices.find(device => device.deviceId !== 'default') || videoDevices[0];
+
+            if (!firstRealCamera) {
+                console.warn('No video input devices found.');
                 return;
             }
 
@@ -1647,201 +2044,174 @@ document.addEventListener("DOMContentLoaded", async (event) => {
                 activeStream.getTracks().forEach(track => track.stop());
             }
 
-            updateDropdownUI(target.textContent);
+            await new Promise(resolve => setTimeout(resolve, 500)); // give time for cleanup
+            console.log('🎥 Forcing capture from device:', firstRealCamera.label);
 
-            const cameraStream = await millicastPublishUserMedia.updateMediaStream('video', target.id);
-            activeStream = cameraStream;
-            videoWin.srcObject = cameraStream;
+            // Strong 4K constraints if available test debug settings
+            const constraints = {
+                video: {
+                    deviceId: { exact: firstRealCamera.deviceId },
+                    width: { ideal: 3840 },
+                    height: { ideal: 2160 },
+                    frameRate: { ideal: 30, max: 60 },
+                    aspectRatio: 16 / 9
+                },
+                audio: true
+            };
 
-            if (millicastPublishUserMedia.isActive()) {
-                const cameraTrack = cameraStream.getVideoTracks()[0];
-                await millicastPublishUserMedia.webRTCPeer.replaceTrack(cameraTrack);
-                console.log("Camera track replaced successfully.");
-            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                activeMediaSource = 'camera';
+                activeStream = stream;
 
-            console.log(`Updated local preview and published camera to: ${target.textContent}`);
-        } catch (error) {
-            console.error("Error switching media source:", error);
-        }
-    });
+                videoWin.srcObject = stream;
+                millicastPublishUserMedia.mediaManager.mediaStream = stream;
 
+                const track = stream.getVideoTracks()[0];
+                const settings = track.getSettings();
+                console.log(`✅ Camera initialized at: ${settings.width}x${settings.height} @ ${settings.frameRate || '?'}fps`);
 
-    navigator.mediaDevices.enumerateDevices().then(async (devices) => {
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                updateDropdownUI(firstRealCamera.label);
 
-        // Avoid the default device
-        const firstRealCamera = videoDevices.find(device => device.deviceId !== 'default') || videoDevices[0];
+                // Optional: Warn if low resolution was returned
+                if (settings.width <= 640 || settings.height <= 480) {
+                    console.warn('⚠️ Low resolution detected. Chrome may have defaulted to fallback settings.');
+                }
 
-        if (!firstRealCamera) {
-            console.warn("No video input devices found.");
-            return;
-        }
-
-        if (activeStream) {
-            activeStream.getTracks().forEach(track => track.stop());
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 500)); // give time for cleanup
-        console.log("🎥 Forcing capture from device:", firstRealCamera.label);
-
-        // Strong 4K constraints if available test debug settings
-        const constraints = {
-            video: {
-                deviceId: { exact: firstRealCamera.deviceId },
-                width: { ideal: 3840 },
-                height: { ideal: 2160 },
-                frameRate: { ideal: 30, max: 60 },
-                aspectRatio: 16 / 9
-            },
-            audio: true
-        };
-
-
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia(constraints);
-            activeMediaSource = 'camera';
-            activeStream = stream;
-
-            videoWin.srcObject = stream;
-            millicastPublishUserMedia.mediaManager.mediaStream = stream;
-
-            const track = stream.getVideoTracks()[0];
-            const settings = track.getSettings();
-            console.log(`✅ Camera initialized at: ${settings.width}x${settings.height} @ ${settings.frameRate || '?'}fps`);
-
-            updateDropdownUI(firstRealCamera.label);
-
-            // Optional: Warn if low resolution was returned
-            if (settings.width <= 640 || settings.height <= 480) {
-                console.warn("⚠️ Low resolution detected. Chrome may have defaulted to fallback settings.");
-            }
-
-        } catch (err) {
-            console.error("❌ Failed to initialize camera:", err);
-        }
-    });
-
-
-
-    /**
-     * Updates the dropdown UI and <p> tag text to reflect the selected source.
-     * @param {string} selectedLabel - The label of the selected source.
-     */
-    function updateDropdownUI(selectedLabel) {
-        const camListItems = document.querySelectorAll('#camList .dropdown-item');
-        const camListBtn = document.getElementById('camListBtn');
-        let label = selectedLabel || 'Select Camera'; // Default text
-
-        camListItems.forEach(item => {
-            if (
-                (item.id === 'screenShare' && activeMediaSource === 'screen') ||
-                (activeMediaSource === 'camera' && item.textContent === selectedLabel)
-            ) {
-                // Highlight the active source
-                item.classList.add('active');
-            } else {
-                item.classList.remove('active');
+            } catch (err) {
+                console.error('❌ Failed to initialize camera:', err);
             }
         });
 
-        // Update the dropdown button text
-        camListBtn.querySelector('p').textContent = label;
-        console.log("Dropdown updated with selected:", label);
-    }
 
-
-    console.log("Current activeMediaSource:", activeMediaSource);
-    console.log("Current activeStream:", activeStream);
-
-    function displayActiveDevice(type) {
-        if (type === 'mic' || !type) {
-            micListBtn.innerHTML = '<p>' + cleanLabel(millicastPublishUserMedia.activeAudio.label) + '</p><span class="boxCover"></span>';
-        }
-        if (type === 'cam' || !type) {
+        /**
+         * Updates the dropdown UI and <p> tag text to reflect the selected source.
+         * @param {string} selectedLabel - The label of the selected source.
+         */
+        function updateDropdownUI(selectedLabel) {
+            const camListItems = document.querySelectorAll('#camList .dropdown-item');
             const camListBtn = document.getElementById('camListBtn');
-            camListBtn.innerHTML = '<p>' + (isScreenSharing ? 'Screen Share' : cleanLabel(millicastPublishUserMedia.activeVideo.label)) + '</p><span class="boxCover"></span>';
-        }
-    }
+            const label = selectedLabel || 'Select Camera'; // Default text
 
+            camListItems.forEach(item => {
+                const special = (
+                    item.id === 'screenShareOnly' ||
+                    item.id === 'screenCameraComposite' ||
+                    item.id === 'cameraScreenComposite' ||
+                    item.id === 'dualCamBtn'
+                );
 
-    function broadcastHandler(b) {
-        if (isBroadcasting) {
-            pubBtn.innerHTML = isBroadcasting ? 'Stop' : 'Start ';
-            
-            onAirFlag.classList.remove('hidden')
-            readyFlag.classList.add('hidden')
-         
-            selectedBandwidthBtn.disabled = false;
-        } else {
-            onAirFlag.classList.add('hidden')
-            readyFlag.classList.remove('hidden')
+                const matchesSpecial =
+                    special && label && item.textContent.toLowerCase().startsWith(label.split('(')[0].toLowerCase());
 
-            pubBtn.disabled = false;
-        }
-        if (pubBtn.value = 'Stop' || isBroadcasting === true) {
-            pubBtn.style.backgroundColor = "red";
+                const isCameraMatch = (activeMediaSource === 'camera' &&
+                    item.textContent.replace(/^📷\s*/, '') === selectedLabel);
 
-        }
-        if (isBroadcasting == false) {
-            pubBtn.style.backgroundColor = "green";
-            pubBtn.value = 'Start';
+                item.classList.toggle('active', matchesSpecial || isCameraMatch);
+            });
 
-        }
-        if (pubBtn.style.backgroundColor != "red") {
-            millicastPublishUserMedia.stop();
-            pubBtn.innerHTML = 'Start';
+            // Update the dropdown button text
+            const p = camListBtn.querySelector('p');
+            if (p) p.textContent = label; else camListBtn.textContent = label;
+            console.log('Dropdown updated with selected:', label);
         }
 
+        console.log('Current activeMediaSource:', activeMediaSource);
+        console.log('Current activeStream:', activeStream);
 
-    }
-   
-
-    /* UTILS */
-    function cleanLabel(s) {
-        if (s.indexOf('Default - ') === 0) {
-            s = s.split('Default - ').join('');
+        function displayActiveDevice(type) {
+            if (type === 'mic' || !type) {
+                micListBtn.innerHTML =
+                    '<p>🎤 ' + cleanLabel(millicastPublishUserMedia.activeAudio.label) + '</p><span class="boxCover"></span>';
+            }
+            if (type === 'cam' || !type) {
+                const camListBtn = document.getElementById('camListBtn');
+                const camLabel = isScreenSharing
+                    ? '🖥️ Screen Share'
+                    : '📷 ' + cleanLabel(millicastPublishUserMedia.activeVideo.label);
+                camListBtn.innerHTML = '<p>' + camLabel + '</p><span class="boxCover"></span>';
+            }
         }
-        return s;
-    }
 
-    function doCopy() {
-        //add to clean text.
-        let view = document.getElementById("viewerURL");
-        let path = (view.textContent || view.innerText).trim();
 
-        let txt = document.createElement('input');
-        txt.type = 'text';
-        txt.readonly = true;
-        txt.value = path;
-        txt.style.position = 'fixed';
-        txt.style.left = '-9999px';
-        document.body.appendChild(txt);
-        //console.log('view: ', txt);
 
-        let iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-        //let txt = input;
-        if (iOS) {
-            console.log('IS iOS!');
-            txt.setAttribute('contenteditable', true);
-            txt.setAttribute('readonly', false);
-            let range = document.createRange();
-            range.selectNodeContents(txt);
-            let s = window.getSelection();
-            s.removeAllRanges();
-            s.addRange(range);
-            txt.setSelectionRange(0, 999999);
-            txt.setAttribute('contenteditable', false);
-            txt.setAttribute('readonly', true);
-        } else {
-            //console.log('NOT iOS!');
-            txt.select();
+        function broadcastHandler(b) {
+            if (isBroadcasting) {
+                pubBtn.innerHTML = isBroadcasting ? 'Stop' : 'Start ';
+
+                onAirFlag.classList.remove('hidden')
+                readyFlag.classList.add('hidden')
+
+                selectedBandwidthBtn.disabled = false;
+            } else {
+                onAirFlag.classList.add('hidden')
+                readyFlag.classList.remove('hidden')
+
+                pubBtn.disabled = false;
+            }
+            if (pubBtn.value = 'Stop' || isBroadcasting === true) {
+                pubBtn.style.backgroundColor = "red";
+
+            }
+            if (isBroadcasting == false) {
+                pubBtn.style.backgroundColor = "green";
+                pubBtn.value = 'Start';
+
+            }
+            if (pubBtn.style.backgroundColor != "red") {
+                millicastPublishUserMedia.stop();
+                pubBtn.innerHTML = 'Start';
+            }
+
+
         }
-        document.execCommand('copy');
-        alert('Copied to Clipboard!');
-        document.body.removeChild(txt);
-        return true;
-    }
 
-    initUI()
+        /* UTILS */
+        function cleanLabel(s) {
+            if (s.indexOf('Default - ') === 0) {
+                s = s.split('Default - ').join('');
+            }
+            return s;
+        }
 
-})
+        function doCopy() {
+            //add to clean text.
+            let view = document.getElementById("viewerURL");
+            let path = (view.textContent || view.innerText).trim();
+
+            let txt = document.createElement('input');
+            txt.type = 'text';
+            txt.readonly = true;
+            txt.value = path;
+            txt.style.position = 'fixed';
+            txt.style.left = '-9999px';
+            document.body.appendChild(txt);
+            //console.log('view: ', txt);
+
+            let iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+            //let txt = input;
+            if (iOS) {
+                console.log('IS iOS!');
+                txt.setAttribute('contenteditable', true);
+                txt.setAttribute('readonly', false);
+                let range = document.createRange();
+                range.selectNodeContents(txt);
+                let s = window.getSelection();
+                s.removeAllRanges();
+                s.addRange(range);
+                txt.setSelectionRange(0, 999999);
+                txt.setAttribute('contenteditable', false);
+                txt.setAttribute('readonly', true);
+            } else {
+                //console.log('NOT iOS!');
+                txt.select();
+            }
+            document.execCommand('copy');
+            alert('Copied to Clipboard!');
+            document.body.removeChild(txt);
+            return true;
+        }
+
+        initUI()
+
+    })
