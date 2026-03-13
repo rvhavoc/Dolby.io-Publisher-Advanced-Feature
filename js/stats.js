@@ -49,71 +49,56 @@
         var rtt = 0, jitter = 0, packetsLost = 0, availBw = 0;
 
         try {
-            // The SDK stats object structure varies by version.
-            // Try multiple known formats.
+            // Actual SDK format (confirmed from live logs):
+            // {
+            //   currentRoundTripTime: 0.052,
+            //   availableOutgoingBitrate: 300000,
+            //   video: { outbounds: [{ bitrateBitsPerSecond, frameWidth, frameHeight, ... }] },
+            //   audio: { outbounds: [{ bitrateBitsPerSecond, ... }] },
+            //   raw: {}
+            // }
 
-            // Format 1: stats.video / stats.audio arrays (parsed format)
-            if (stats.video && stats.video.length > 0) {
-                var v = stats.video[0];
-                videoBitrate = Math.round((v.bitrate || 0) / 1000);
-                videoWidth = v.frameWidth || v.width || 0;
-                videoHeight = v.frameHeight || v.height || 0;
-                videoFps = v.framesPerSecond || v.fps || 0;
-                packetsLost = v.packetsLost || v.totalPacketsLost || 0;
-                jitter = Math.round((v.jitter || 0) * 1000);
-            }
-            if (stats.audio && stats.audio.length > 0) {
-                var a = stats.audio[0];
-                audioBitrate = Math.round((a.bitrate || 0) / 1000);
-                if (!jitter && a.jitter) jitter = Math.round(a.jitter * 1000);
-                if (!packetsLost && a.packetsLost) packetsLost = a.packetsLost;
-            }
+            // Top-level transport stats
+            if (stats.currentRoundTripTime) rtt = Math.round(stats.currentRoundTripTime * 1000);
+            if (stats.availableOutgoingBitrate) availBw = Math.round(stats.availableOutgoingBitrate / 1000);
 
-            // Format 2: stats.totalRoundTripTime or stats.currentRoundTripTime
-            if (stats.candidatePair || stats.selectedCandidatePair) {
-                var cp = stats.candidatePair || stats.selectedCandidatePair;
-                rtt = Math.round((cp.currentRoundTripTime || 0) * 1000);
-                availBw = Math.round((cp.availableOutgoingBitrate || 0) / 1000);
-            }
-
-            // Format 3: Flat stats properties
-            if (!rtt && stats.roundTripTime) rtt = Math.round(stats.roundTripTime * 1000);
-            if (!rtt && stats.currentRoundTripTime) rtt = Math.round(stats.currentRoundTripTime * 1000);
-            if (!availBw && stats.availableOutgoingBitrate) availBw = Math.round(stats.availableOutgoingBitrate / 1000);
-
-            // Format 4: raw stats with totalBitrate
-            if (!videoBitrate && stats.totalBitrate) videoBitrate = Math.round(stats.totalBitrate / 1000);
-            if (!videoBitrate && stats.bitrate) videoBitrate = Math.round(stats.bitrate / 1000);
-
-            // Format 5: output.video / output.audio (another SDK version format)
-            if (stats.output) {
-                if (stats.output.video && stats.output.video.length > 0) {
-                    var ov = stats.output.video[0];
-                    if (!videoBitrate) videoBitrate = Math.round((ov.bitrate || 0) / 1000);
-                    if (!videoWidth) videoWidth = ov.frameWidth || 0;
-                    if (!videoHeight) videoHeight = ov.frameHeight || 0;
-                    if (!videoFps) videoFps = ov.framesPerSecond || 0;
-                }
-                if (stats.output.audio && stats.output.audio.length > 0) {
-                    var oa = stats.output.audio[0];
-                    if (!audioBitrate) audioBitrate = Math.round((oa.bitrate || 0) / 1000);
+            // Video outbound stats
+            if (stats.video && stats.video.outbounds && stats.video.outbounds.length > 0) {
+                var v = stats.video.outbounds[0];
+                videoBitrate = Math.round((v.bitrateBitsPerSecond || v.bitrate || 0) / 1000);
+                videoWidth = v.frameWidth || 0;
+                videoHeight = v.frameHeight || 0;
+                videoFps = v.framesPerSecond || 0;
+                if (v.qualityLimitationReason && v.qualityLimitationReason !== 'none') {
+                    // Could display this info too
                 }
             }
 
-            // Format 6: raw property (contains the raw RTCStatsReport data)
+            // Audio outbound stats
+            if (stats.audio && stats.audio.outbounds && stats.audio.outbounds.length > 0) {
+                var a = stats.audio.outbounds[0];
+                audioBitrate = Math.round((a.bitrateBitsPerSecond || a.bitrate || 0) / 1000);
+            }
+
+            // Video inbound stats (for jitter/packetsLost from remote)
+            if (stats.video && stats.video.inbounds && stats.video.inbounds.length > 0) {
+                var vi = stats.video.inbounds[0];
+                if (vi.jitter) jitter = Math.round(vi.jitter * 1000);
+                if (vi.packetsLost) packetsLost = vi.packetsLost;
+            }
+
+            // Audio inbound stats (fallback jitter/loss)
+            if (stats.audio && stats.audio.inbounds && stats.audio.inbounds.length > 0) {
+                var ai = stats.audio.inbounds[0];
+                if (!jitter && ai.jitter) jitter = Math.round(ai.jitter * 1000);
+                if (!packetsLost && ai.packetsLost) packetsLost = ai.packetsLost;
+            }
+
+            // raw RTCStatsReport (fallback for jitter/loss from remote-inbound-rtp)
             if (stats.raw && typeof stats.raw.forEach === 'function') {
                 stats.raw.forEach(function (stat) {
-                    if (stat.type === 'outbound-rtp' && stat.kind === 'video') {
-                        if (!videoWidth) videoWidth = stat.frameWidth || 0;
-                        if (!videoHeight) videoHeight = stat.frameHeight || 0;
-                        if (!videoFps) videoFps = stat.framesPerSecond || 0;
-                    }
-                    if (stat.type === 'candidate-pair' && stat.state === 'succeeded') {
-                        if (!rtt) rtt = Math.round((stat.currentRoundTripTime || 0) * 1000);
-                        if (!availBw) availBw = Math.round((stat.availableOutgoingBitrate || 0) / 1000);
-                    }
                     if (stat.type === 'remote-inbound-rtp') {
-                        if (!jitter) jitter = Math.round((stat.jitter || 0) * 1000);
+                        if (!jitter && stat.jitter) jitter = Math.round(stat.jitter * 1000);
                         if (!packetsLost && stat.packetsLost) packetsLost = stat.packetsLost;
                     }
                 });
