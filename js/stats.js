@@ -26,12 +26,42 @@
     var prevTimestamp = 0;
 
     function getOverlay() {
-        return document.getElementById('statsOverlay');
+        var el = document.getElementById('statsOverlay');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'statsOverlay';
+            el.style.cssText = 'position:absolute;top:52px;left:20px;width:220px;background:transparent;' +
+                'color:#0f0;font-family:Courier New,monospace;font-size:11px;padding:4px 8px;' +
+                'border-radius:4px;z-index:200;pointer-events:none;line-height:1.5;' +
+                'text-shadow:0 0 4px rgba(0,0,0,0.9),0 0 8px rgba(0,0,0,0.7);display:none;';
+            var airView = document.getElementById('airIndicatorView');
+            if (airView && airView.parentNode) {
+                airView.parentNode.insertBefore(el, airView.nextSibling);
+            } else {
+                document.body.appendChild(el);
+            }
+            // Inject CSS for stats rows if not already present
+            if (!document.getElementById('statsOverlayCSS')) {
+                var style = document.createElement('style');
+                style.id = 'statsOverlayCSS';
+                style.textContent =
+                    '#statsOverlay .stats-row{display:flex;justify-content:space-between;padding:1px 0}' +
+                    '#statsOverlay .stats-label{color:#ccc}' +
+                    '#statsOverlay .stats-value.stats-ok{color:#00ff00;font-weight:bold}' +
+                    '#statsOverlay .stats-value.stats-bad{color:#ff2222;font-weight:bold}';
+                document.head.appendChild(style);
+            }
+            console.log('[Stats] Created statsOverlay div dynamically');
+        }
+        return el;
     }
 
     function renderOverlay(videoBitrate, audioBitrate, videoWidth, videoHeight, videoFps, availBw, rtt, jitter, packetsLost) {
         var overlay = getOverlay();
         if (!overlay) return;
+
+        // Ensure visible
+        overlay.style.display = 'block';
 
         overlay.innerHTML =
             '<div class="stats-row"><span class="stats-label">Video:</span> <span class="stats-value ' + (videoBitrate < 100 ? 'stats-bad' : 'stats-ok') + '">' + videoBitrate + ' kbps</span></div>' +
